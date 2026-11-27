@@ -95,7 +95,7 @@ code,pre{font-family:"JetBrains Mono",ui-monospace,monospace}
 #flow ul,#flow ol{padding-left:1.3em;margin:0 0 .9em;text-align:left}
 #flow li{margin-bottom:.25em}
 #flow code{font-size:.84em;background:color-mix(in srgb,var(--acc) 10%,transparent);padding:.05em .3em;border-radius:4px}
-#flow pre{hyphens:none;font-size:.74em;line-height:1.55;background:#1e2329;color:#e6e6e6;padding:14px 16px;border-radius:10px;overflow-x:auto;text-align:left;break-inside:avoid;margin:0 0 1em;white-space:pre-wrap}
+#flow pre{hyphens:none;font-size:.74em;line-height:1.55;background:#1e2329;color:#e6e6e6;padding:14px 16px;border-radius:10px;overflow:auto;max-height:62vh;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;text-align:left;break-inside:avoid;margin:0 0 1em;white-space:pre;tab-size:4}
 #flow pre code{background:none;padding:0;font-size:1em}
 .k{color:#ff9e64}.a{color:#7dcfff}.s{color:#9ece6a}.c{color:#7f8b99;font-style:italic}
 .fig{break-inside:avoid;margin:.4em 0 1.2em}
@@ -197,6 +197,15 @@ aside.drawer.open{transform:none}
 #flow .tree2 .kids>div{flex:1 1 9em;border:1.5px solid var(--acc);border-radius:9px;padding:.4em .6em;background:color-mix(in srgb,var(--acc) 7%,var(--pg));overflow-wrap:anywhere}
 #flow .tree2 .kids.sm{border-top-width:1px;margin-top:8px;padding-top:8px;font-size:.92em}
 #flow .tree2 .kids.sm>div{flex-basis:4.5em;padding:.2em .4em}
+
+/* diagrams: arrows between steps/levels, scrollable if too big */
+#flow .diag,#flow .tree2,#flow .flow{max-height:70vh;overflow:auto;overscroll-behavior:contain}
+#flow .diag .row+.row::before{content:"\2193";flex:0 0 100%;text-align:center;color:var(--acc);font-size:1.4em;line-height:.8;margin:-2px 0}
+#flow .tree2>.top{display:block;width:max-content;max-width:100%;margin:0 auto}
+#flow .tree2>.kids{border-top:0;margin-top:26px;padding-top:0}
+#flow .tree2>.kids>div{position:relative}
+#flow .tree2>.kids>div::before{content:"\2193";position:absolute;top:-23px;left:50%;transform:translateX(-50%);color:var(--acc);font-size:1.35em;line-height:1}
+#flow .tree2 .kids.sm{border-top:1px solid var(--acc);margin-top:8px;padding-top:8px}
 #flow .chnav{display:flex;justify-content:space-between;gap:12px;margin:2em 0 0;padding-top:1em;border-top:1px solid var(--edge);text-align:left;break-inside:avoid}
 #flow .chnav a{color:var(--acc);font-weight:600;text-decoration:none}
 #flow .chnav small{display:block;color:var(--pm);font-weight:400}
