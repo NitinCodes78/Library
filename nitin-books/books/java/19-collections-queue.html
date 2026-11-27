@@ -1,0 +1,144 @@
+<h1>Collections Framework: Overview, Queue and Deque</h1>
+<p class="kicker">One architecture for managing groups of objects: add, update, delete, search.</p>
+
+<h2>What is the Collections Framework?</h2>
+<p>A <b>group of objects</b> (package <code>java.util</code>). The framework provides us the <b>architecture to manage</b> the group of objects, i.e. add, update, delete, search etc.</p>
+<p><b>Why was it needed?</b> Prior to JCF, we had <code>Array</code>, <code>Vector</code>, <code>Hashtable</code>. The problem was that there was <b>no common interface</b>, so it was difficult to remember the methods for each.</p>
+
+<h2>The hierarchy</h2>
+<div class="tree2">
+<div class="top">Iterable &rarr; Collection</div>
+<div class="kids">
+<div><b>List</b><div class="kids sm"><div>ArrayList</div><div>Vector &rarr; Stack</div><div>LinkedList<br><small>also a Deque</small></div></div></div>
+<div><b>Queue</b><div class="kids sm"><div>PriorityQueue</div><div><b>Deque</b><br><small>ArrayDeque, LinkedList</small></div></div></div>
+<div><b>Set</b><div class="kids sm"><div>HashSet</div><div>LinkedHashSet</div><div>SortedSet &rarr; NavigableSet &rarr; TreeSet</div></div></div>
+</div></div>
+<div class="tree2" style="margin-top:.8rem">
+<div class="top">Map <small>(separate branch, not a Collection)</small></div>
+<div class="kids"><div>HashMap</div><div>LinkedHashMap</div><div>Hashtable</div><div>SortedMap &rarr; TreeMap</div></div></div>
+<p>Legend: interfaces are the abstract boxes (Iterable, Collection, List, Queue, Deque, Set, SortedSet, NavigableSet, Map, SortedMap); the rest are concrete classes. <code>LinkedList</code> implements <b>both List and Deque</b>.</p>
+
+<h2>Iterable and Iterator</h2>
+<p><b>Iterable</b> is used to traverse the collection. Its <code>iterator()</code> returns an <b>Iterator</b> object, which provides these methods:</p>
+<table>
+<tr><th>Method</th><th>Does</th></tr>
+<tr><td><code>hasNext()</code></td><td>returns true if there are more elements in the collection</td></tr>
+<tr><td><code>next()</code></td><td>returns the next element in the collection</td></tr>
+<tr><td><code>remove()</code></td><td>removes the last element returned by the iterator</td></tr>
+</table>
+<pre><code class="java">List&lt;Integer&gt; values = new ArrayList&lt;&gt;(Arrays.asList(1, 2, 3));
+
+// (i) explicit iterator
+Iterator&lt;Integer&gt; valuesIterator = values.iterator();
+while (valuesIterator.hasNext()) {
+    int val = valuesIterator.next();
+    System.out.println(val);
+    if (val == 3) valuesIterator.remove();
+}
+
+// (ii) for-each
+for (int val : values) { System.out.println(val); }
+
+// (iii) forEach with a lambda
+values.forEach((Integer val) -&gt; System.out.println(val));</code></pre>
+<p>Whoever implements <code>Iterable</code>, Java allows to iterate in these ways.</p>
+<div class="box extra"><strong>Good to know</strong>
+<p>Removing from a list <i>inside</i> a for-each loop with <code>values.remove(...)</code> throws <code>ConcurrentModificationException</code>. Use <code>iterator.remove()</code> (as above) or <code>removeIf()</code>.</p></div>
+
+<h2>Methods present in Collection</h2>
+<table>
+<tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>size()</code>, <code>isEmpty()</code>, <code>contains()</code></td><td>basic queries</td></tr>
+<tr><td><code>toArray()</code></td><td>converts the collection to an array</td></tr>
+<tr><td><code>add()</code>, <code>remove()</code></td><td>add or remove one element</td></tr>
+<tr><td><code>addAll()</code></td><td>insert one collection into another (the one passed in the parameter)</td></tr>
+<tr><td><code>removeAll()</code></td><td>remove all elements which are present in the collection passed</td></tr>
+<tr><td><code>clear()</code></td><td>remove all elements from the collection</td></tr>
+<tr><td><code>equals()</code></td><td>are the two collections equal?</td></tr>
+<tr><td><code>stream()</code> &amp; <code>parallelStream()</code> <b>*</b></td><td>an efficient way of collection filtering, processing data etc.</td></tr>
+</table>
+
+<h3>Collection vs Collections</h3>
+<ul>
+<li><b>Collection</b> is part of the Java collection framework. It's an <b>interface</b> that exposes various methods, implemented by the various collection classes like ArrayList, Stack, LinkedList etc.</li>
+<li><b>Collections</b> is a <b>utility class</b> and provides <b>static methods</b> like swapping, searching, reverse, copy etc.</li>
+</ul>
+<pre><code class="java">Collections.sort(list);
+Collections.min(values);</code></pre>
+
+<h2>Queue</h2>
+<p>An <b>interface</b>, child of the <code>Collection</code> interface. Generally follows <b>FIFO</b> (first in, first out), but there are exceptions like <code>PriorityQueue</code>. Supports all methods in Collection plus some other methods:</p>
+<table>
+<tr><th>Method</th><th>When it fails / queue is empty</th></tr>
+<tr><td><code>add()</code></td><td>throws an <b>exception</b> if insertion fails. Inserting <code>null</code> throws NPE.</td></tr>
+<tr><td><code>offer()</code></td><td>returns <b>false</b> if insertion fails. Null insertion throws NPE.</td></tr>
+<tr><td><code>poll()</code></td><td>returns <b>null</b> if the queue is empty</td></tr>
+<tr><td><code>remove()</code></td><td>throws an <b>exception</b> if the queue is empty</td></tr>
+<tr><td><code>peek()</code></td><td>returns <b>null</b> if the queue is empty</td></tr>
+<tr><td><code>element()</code></td><td>throws an <b>exception</b> if the queue is empty</td></tr>
+</table>
+<div class="diag"><div class="row"><div class="cb sm">insert<br><small>add / offer</small></div><div class="cb wide">[ 5 ] [ 9 ] [ 2 ] [ 7 ]<br><small>head &larr; &rarr; tail</small></div><div class="cb sm">take<br><small>poll / remove</small></div></div></div>
+<p>Pattern to remember: <b>add / remove / element</b> throw; <b>offer / poll / peek</b> return a special value (false / null).</p>
+
+<h3>PriorityQueue</h3>
+<p>Implements <code>Queue</code>. It is based on a <b>priority heap</b> (min and max heap). Elements are stored according to <b>natural ordering</b> (by default) or by a <b>Comparator</b> provided during queue construction time.</p>
+<pre><code class="java">PriorityQueue&lt;Integer&gt; minPQ = new PriorityQueue&lt;&gt;();     // for Integer it's ascending, i.e. min heap
+
+PriorityQueue&lt;Integer&gt; maxPQ = new PriorityQueue&lt;&gt;(Comparator.reverseOrder());
+// now it behaves like a max heap</code></pre>
+<table>
+<tr><th>Operation</th><th>Complexity</th></tr>
+<tr><td>add &amp; offer</td><td>O(log n): heapify</td></tr>
+<tr><td>poll &amp; remove</td><td>O(log n): heapify</td></tr>
+<tr><td>peek</td><td>O(1)</td></tr>
+<tr><td>remove an arbitrary element</td><td>O(n): iterate to find the element</td></tr>
+</table>
+<p>Prefer <code>Comparator.reverseOrder()</code> or <code>(a, b) -&gt; Integer.compare(b, a)</code> for a max heap: the subtraction trick <code>b - a</code> can overflow for large or mixed-sign values and give a wrong order. Also remember that a PriorityQueue's <b>iteration or printing order is not sorted</b>; only <code>poll()</code> gives you elements in priority order.</p>
+
+<h2>Deque</h2>
+<p>Stands for <b>double ended queue</b>: addition and removal from both sides of the queue. It helps to implement both <b>Stack (LIFO)</b> and <b>Queue (FIFO)</b>, i.e. it achieves the functionality of both. It has some additional methods than Queue.</p>
+<table>
+<tr><th>Throw exception</th><th>Do not throw exception</th></tr>
+<tr><td><code>addFirst(e)</code></td><td><code>offerFirst(e)</code></td></tr>
+<tr><td><code>removeFirst()</code></td><td><code>pollFirst()</code></td></tr>
+<tr><td><code>getFirst()</code></td><td><code>peekFirst()</code></td></tr>
+<tr><td><code>addLast(e)</code></td><td><code>offerLast(e)</code></td></tr>
+<tr><td><code>removeLast()</code></td><td><code>pollLast()</code></td></tr>
+<tr><td><code>getLast()</code></td><td><code>peekLast()</code></td></tr>
+</table>
+<p><code>push()</code> and <code>pop()</code> methods are also available to behave as a <b>stack</b>. It's faster for single-threaded use, and <b>recommended for stack and queue DSA problems</b>.</p>
+<p>The normal queue methods map internally:</p>
+<table>
+<tr><th>Queue method</th><th>calls internally</th></tr>
+<tr><td><code>add()</code></td><td><code>addLast()</code></td></tr>
+<tr><td><code>offer()</code></td><td><code>offerLast()</code></td></tr>
+<tr><td><code>poll()</code></td><td><code>pollFirst()</code></td></tr>
+<tr><td><code>remove()</code></td><td><code>removeFirst()</code></td></tr>
+<tr><td><code>peek()</code></td><td><code>peekFirst()</code></td></tr>
+<tr><td><code>element()</code></td><td><code>getFirst()</code></td></tr>
+</table>
+<h3>ArrayDeque</h3>
+<p>A <b>concrete class</b> which implements the methods available in the Queue and Deque interfaces.</p>
+<pre><code class="java">ArrayDeque&lt;Integer&gt; ad = new ArrayDeque&lt;&gt;();
+ad.push(1);  ad.push(2);
+ad.pop();                 // 2 (LIFO, like a stack)
+ad.offer(3);  ad.poll();  // FIFO, like a queue</code></pre>
+<h4>Time complexity</h4>
+<ul>
+<li><b>Insertion:</b> amortized (most of the time, or on average) <b>O(1)</b>, except a few cases like <b>O(n)</b>: when the queue size threshold is reached and, to insert an element, its values are copied to a new, bigger array.</li>
+<li><b>Deletion:</b> O(1).</li>
+<li><b>Access at the ends:</b> O(1): <code>getFirst</code>, <code>getLast</code> etc.</li>
+<li><b>Search for an arbitrary value</b> (<code>contains()</code>): <b>O(n)</b>.</li>
+</ul>
+
+<p><b>PriorityQueue and ArrayDeque are not thread-safe. They don't allow null elements.</b> Their thread-safe versions are <code>PriorityBlockingQueue</code> and <code>ConcurrentLinkedDeque</code>:</p>
+<pre><code class="java">PriorityBlockingQueue&lt;Integer&gt; pq = new PriorityBlockingQueue&lt;&gt;();
+ConcurrentLinkedDeque&lt;Integer&gt; ab = new ConcurrentLinkedDeque&lt;&gt;();</code></pre>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Collection vs Collections?</summary><p>Collection is the root interface for List, Set and Queue. Collections is a utility class with static helpers (sort, reverse, min, max, unmodifiableList).</p></details>
+<details><summary>poll() vs remove() on a Queue?</summary><p>Both take the head. On an empty queue <code>poll()</code> returns null; <code>remove()</code> throws <code>NoSuchElementException</code>.</p></details>
+<details><summary>Why prefer ArrayDeque over Stack?</summary><p><code>Stack</code> is an old Vector child with synchronised methods (slow). <code>ArrayDeque</code> is faster and has a cleaner API.</p></details>
+<details><summary>Is Map part of the Collection hierarchy?</summary><p>No. Map is a separate interface hierarchy because it stores key-value pairs.</p></details>
+<details><summary>How do you make a max-heap PriorityQueue?</summary><p>Pass <code>Comparator.reverseOrder()</code> to the constructor.</p></details>
+</div>

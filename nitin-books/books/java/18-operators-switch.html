@@ -1,0 +1,166 @@
+<h1>Operators and Switch</h1>
+<p class="kicker">From + and - to bit shifts, precedence tricks and the modern switch.</p>
+
+<h2>Operators in Java</h2>
+<table>
+<tr><th>Type</th><th>Operators</th></tr>
+<tr><td>Arithmetic</td><td><code>+ - * / %</code></td></tr>
+<tr><td>Assignment</td><td><code>+= -= %= *= =</code></td></tr>
+<tr><td>Relational</td><td><code>== &gt; &lt; &gt;= &lt;= !=</code></td></tr>
+<tr><td>Logical</td><td><code>&amp;&amp; || !</code></td></tr>
+<tr><td>Unary</td><td><code>++ -- - + !</code> (unary minus, unary plus, logical NOT: <code>!false</code>)</td></tr>
+</table>
+<p>Unary plus/minus: if <code>a = -5</code>, then <code>+(a)</code> is -5 and <code>-(a)</code> is 5.</p>
+
+<h2>Bitwise operators</h2>
+<p>They work on 0s and 1s and are <b>very fast</b>.</p>
+<table>
+<tr><th>A</th><th>B</th><th>AND <code>&amp;</code></th><th>OR <code>|</code></th><th>XOR <code>^</code></th></tr>
+<tr><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td>1</td><td>0</td><td>0</td><td>1</td><td>1</td></tr>
+<tr><td>0</td><td>1</td><td>0</td><td>1</td><td>1</td></tr>
+<tr><td>1</td><td>1</td><td>1</td><td>1</td><td>0</td></tr>
+</table>
+<p>XOR: if both are the same then 0, else 1. Suppose <code>int a = 4; b = 6;</code></p>
+<pre><code>a in bits:  0100
+b in bits:  0110
+
+a &amp; b  →  0100   i.e. 4
+a | b  →  0110   i.e. 6
+a ^ b  →  0010   i.e. 2</code></pre>
+
+<h3>Bitwise NOT <code>~</code></h3>
+<p>Changes 1 to 0 and 0 to 1. <code>~a</code> for <code>a = 4 (0100)</code> becomes <code>1011</code>.</p>
+<p>The leftmost bit is the <b>Most Significant Bit (MSB)</b>, used as the <b>sign bit</b>; the rightmost is the Least Significant Bit (LSB). When the number is <b>positive the MSB is 0</b>, and it is <b>1 when the number is negative</b>.</p>
+<div class="diag"><div class="row"><div class="cb">1<br><small>-2³ = -8</small></div><div class="cb">0<br><small>4</small></div><div class="cb">1<br><small>2</small></div><div class="cb">1<br><small>1</small></div></div><p style="text-align:center">1011 &nbsp;=&nbsp; -8 + 2 + 1 &nbsp;=&nbsp; <b>-5</b></p></div>
+<p>It can be calculated with the formula: <b>~n = -(n + 1)</b>.</p>
+
+<h4>How can we confirm -5 is 1011?</h4>
+<ol>
+<li>Take the positive bits of 5, i.e. <code>0101</code>.</li>
+<li>Then find its <b>2's complement</b>.</li>
+<li>1st complement = <code>1010</code> (reverse all its bits).</li>
+<li>2nd complement = <code>1010 + 1 = 1011</code> (MSB is 1).</li>
+</ol>
+
+<h3>Bitwise shift operators</h3>
+<table>
+<tr><th>Operator</th><th>Name</th></tr>
+<tr><td><code>&lt;&lt;</code></td><td>signed left shift</td></tr>
+<tr><td><code>&gt;&gt;</code></td><td>signed right shift</td></tr>
+<tr><td><code>&gt;&gt;&gt;</code></td><td>unsigned right shift</td></tr>
+</table>
+<p>There is no <code>&lt;&lt;&lt;</code> (unsigned left shift), as <code>&lt;&lt;</code> and <code>&lt;&lt;&lt;</code> would be equal.</p>
+<p><code>a = 4</code> i.e. <code>00100</code></p>
+<ul>
+<li><b><code>a &lt;&lt; 1</code></b>: every bit moves left by one, the leftmost bit is discarded, the LSB becomes empty and is <b>filled by zero</b>: <code>01000</code> (8).</li>
+<li><b><code>a &lt;&lt; 2</code></b>: <code>10000</code> (16), the new empty places filled with zero.</li>
+<li><b><code>a &gt;&gt; 1</code></b>: every bit moves right; the empty MSB position gets <b>filled by what was there earlier</b> (the sign bit). It was 0, so <code>00010</code> (2).</li>
+</ul>
+<p>Suppose <code>a = -5</code> i.e. <code>1011</code>:</p>
+<ul>
+<li><b><code>a &gt;&gt; 1</code></b>: the empty MSB gets filled by what was there earlier, that is 1: <code>1101</code>.</li>
+<li><b><code>a &gt;&gt;&gt; 1</code></b>: in unsigned right shift, the MSB position is <b>always filled with zero</b> regardless of what was there earlier: <code>0101</code> (in this 4-bit picture).</li>
+</ul>
+<ol>
+<li>Shifting left by <i>n</i> bits <b>multiplies</b> a number by 2<sup>n</sup>, faster than <code>Math.pow(2, n)</code>.</li>
+<li>Right shifting by <i>n</i> bits <b>divides</b> by 2<sup>n</sup>.</li>
+</ol>
+<ul>
+<li>The 4-bit pictures are for learning. A real Java <code>int</code> has <b>32 bits</b>, so <code>-5 &gt;&gt;&gt; 1</code> is <b>2147483645</b>.</li>
+<li>Right shift of a negative odd number <b>rounds toward negative infinity</b>: <code>-5 &gt;&gt; 1 = -3</code> (<code>1101</code> in 4 bits).</li>
+<li>Left shift can <b>overflow</b>: <code>1 &lt;&lt; 31</code> is negative. The shift amount is taken modulo 32 for <code>int</code> (<code>1 &lt;&lt; 33</code> equals <code>1 &lt;&lt; 1</code>).</li>
+</ul>
+
+<h2>Ternary and type comparison</h2>
+<pre><code class="java">int max = a &gt; b ? a : b;                 // ternary
+
+obj instanceof Eagle                      // true or false
+//  ^ an object   ^ a class</code></pre>
+<p>The <b>type comparison operator</b> <code>instanceof</code> is used to do the type check: whether a particular object is of a certain class or not.</p>
+<div class="box extra"><strong>Good to know</strong>
+<p><code>null instanceof Anything</code> is always <code>false</code>. Java 16+ lets you write <code>if (obj instanceof Eagle e) { e.fly(); }</code>, declaring the cast variable in one go.</p></div>
+
+<h2>Precedence and associativity</h2>
+<p>From the highest to the lowest:</p>
+<table>
+<tr><th>Operators</th><th>Symbols</th><th>Associativity</th></tr>
+<tr><td>Parentheses</td><td><code>()</code>, <code>[]</code></td><td>left to right</td></tr>
+<tr><td>Unary: postfix</td><td><code>expr++</code>, <code>expr--</code></td><td>left to right</td></tr>
+<tr><td>Unary: prefix</td><td><code>--expr</code>, <code>++expr</code></td><td>right to left</td></tr>
+<tr><td>Multiplicative</td><td><code>* / %</code></td><td>left to right</td></tr>
+<tr><td>Additive</td><td><code>+ -</code></td><td>left to right</td></tr>
+<tr><td>Bitwise shift</td><td><code>&lt;&lt; &gt;&gt; &gt;&gt;&gt;</code></td><td>left to right</td></tr>
+<tr><td>Relational</td><td><code>&lt; &gt; &lt;= &gt;=</code></td><td>left to right</td></tr>
+<tr><td>Equality</td><td><code>==</code> <code>!=</code></td><td>left to right</td></tr>
+<tr><td>Bitwise AND / XOR / OR</td><td><code>&amp;</code> <code>^</code> <code>|</code></td><td>left to right</td></tr>
+<tr><td>Logical AND / OR</td><td><code>&amp;&amp;</code> <code>||</code></td><td>left to right</td></tr>
+<tr><td>Ternary</td><td><code>? :</code></td><td>right to left</td></tr>
+<tr><td>Assignment</td><td><code>= += ...</code></td><td>right to left</td></tr>
+</table>
+<p>If two operators have the <b>same precedence</b>, then move with <b>associativity</b>.</p>
+
+<div class="box ex"><strong>The classic puzzle</strong>
+<pre><code class="java">int a = 4;
+a = a + a++ + ++a * --a + a--;</code></pre>
+<p>Go left to right, replacing each term:</p>
+<table>
+<tr><th>Term</th><th>Value used</th><th><code>a</code> afterwards</th></tr>
+<tr><td><code>a</code></td><td>4</td><td>4</td></tr>
+<tr><td><code>a++</code></td><td>4 (then a becomes 5)</td><td>5</td></tr>
+<tr><td><code>++a</code></td><td>6</td><td>6</td></tr>
+<tr><td><code>--a</code></td><td>5</td><td>5</td></tr>
+<tr><td><code>a--</code></td><td>5 (then a becomes 4)</td><td>4</td></tr>
+</table>
+<p>= 4 + 4 + (6 * 5) + 5 = 4 + 4 + 30 + 5 = <b>43</b>. The <code>*</code> is done first (higher precedence), the rest add left to right, and the final assignment overwrites the last <code>a--</code>.</p></div>
+
+<h2>Switch statements</h2>
+<pre><code class="java">int a = 1, b = 2;
+switch (a + b) {
+    case 1:
+        System.out.println("...");
+        break;                 // break is necessary, else all the cases get executed (fall-through)
+    case 2:
+        // ...
+        break;
+    default:                   // default can come here also
+        // ...
+        break;                 // compulsory if default is not last
+    case 3:
+        // this gets executed: a + b = 3
+}</code></pre>
+<p>Cases can be combined, to run the same code:</p>
+<pre><code class="java">case 1: case 2: case 3:        // old style, stacked
+    // ...
+case 1, 2, 3 -&gt;                // Java 14+, same thing, cleaner</code></pre>
+
+<h3>Rules</h3>
+<ol>
+<li><b>Supported data types</b> for switch: <code>int</code>, <code>short</code>, <code>byte</code>, <code>char</code> or the wrapper classes of them (<code>Integer</code>, <code>Short</code>, <code>Byte</code>, <code>Character</code>), plus <b>enum</b> and <b>String</b>.</li>
+<li>The data type in switch and the cases should be the <b>same</b> (a <code>String</code> switch can't have <code>case 1</code>).</li>
+<li><code>return</code> is not possible <b>within a switch that produces a value</b> (see below).</li>
+<li>The alternative is the arrow form <code>case N -&gt;</code>.</li>
+</ol>
+<pre><code class="java">String day = "";
+int val = 1;
+String outputVal = switch (val) {
+    case 1 -&gt; "One";
+    case 2 -&gt; "Two";
+    case 3 -&gt; "None";
+};     // the result gets assigned; we cannot write some other logic here, just return a value</code></pre>
+<p>We use <code>yield</code> to counter this issue, when a case needs more logic:</p>
+<pre><code class="java">String outputVal = switch (val) {
+    case 1 -&gt; {
+        // some logic
+        yield "One";
+    }
+    default -&gt; "Other";
+};</code></pre>
+<p>A <code>return</code> <b>is</b> allowed inside a classic <code>switch</code> <i>statement</i> (it just exits the method). It is the new switch <i>expression</i>, the one that produces a value, where <code>return</code>, <code>break</code> and <code>continue</code> can't jump out. A switch expression must also be <b>exhaustive</b>: cover every case, or add a <code>default</code> (enums can skip it if all constants are listed).</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>== vs equals? &amp; vs &amp;&amp; ?</summary><p><code>&amp;&amp;</code> short-circuits (stops when the left side is false); <code>&amp;</code> always evaluates both sides.</p></details>
+<details><summary>Fast ways to check even/odd or multiply by 8?</summary><p><code>(n &amp; 1) == 0</code> means even; <code>n &lt;&lt; 3</code> is n * 8.</p></details>
+<details><summary>Difference between &gt;&gt; and &gt;&gt;&gt;?</summary><p><code>&gt;&gt;</code> keeps the sign (fills with the sign bit); <code>&gt;&gt;&gt;</code> always fills zeros, so a negative number becomes a big positive.</p></details>
+<details><summary>What if you forget break in a switch?</summary><p>Execution falls through into the next cases until a break or the end.</p></details>
+</div>

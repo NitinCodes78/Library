@@ -1,0 +1,70 @@
+<h1>Filters vs Interceptors</h1>
+<p class="kicker">Two places to intercept an HTTP request: one belongs to the servlet container, the other to Spring MVC.</p>
+
+<h2>Where each one sits</h2>
+<div class="flow"><b>Request</b><i>Servlet container (Tomcat)</i><b>Filter chain</b><i>Servlet</i><b>DispatcherServlet</b><i>HandlerMapping</i><b>Interceptors</b><i>then</i><b>Controller</b></div>
+<table>
+<tr><th>Filter</th><th>Interceptor</th></tr>
+<tr><td>Part of the <b>Servlet specification</b> (servlet container).</td><td>Specific to the <b>Spring framework</b> (Spring MVC).</td></tr>
+<tr><td>Intercepts the HTTP request and response <b>before they reach the servlet</b>.</td><td>Intercepts the HTTP request and response <b>before they reach the controller</b>.</td></tr>
+<tr><td>Used when we want logic that is <b>agnostic of the underlying servlets</b>.</td><td>Used when the logic is <b>specific to a particular servlet</b> (DispatcherServlet and Spring MVC).</td></tr>
+<tr><td>Many filters are possible, with ordering between them.</td><td>Many interceptors are possible, with ordering between them.</td></tr>
+<tr><td><code>jakarta.servlet.Filter</code>: <code>doFilter(request, response, chain)</code></td><td><code>HandlerInterceptor</code>: <code>preHandle</code>, <code>postHandle</code>, <code>afterCompletion</code></td></tr>
+</table>
+
+<h2>What is a servlet (again)?</h2>
+<p>A servlet is a Java class that accepts the incoming request, processes it and returns the response. We can create several, for example Servlet 1 configured to handle REST APIs and Servlet 2 configured to handle SOAP APIs. In the same way, <code>DispatcherServlet</code> is the servlet provided by Spring, configured by default to handle all APIs (<code>/*</code>).</p>
+<div class="diag">
+<div class="row"><div class="cb">Servlet container</div></div>
+<div class="row"><div class="cb sm">Filter 1</div><div class="cb sm">Filter 2</div><div class="cb">DispatcherServlet (Spring)</div></div>
+<div class="row"><div class="cb sm">Interceptor 1</div><div class="cb sm">Interceptor 2</div><div class="cb">Controller</div></div>
+</div>
+<p>So a Filter can sit in front of <b>any</b> servlet, even a non-Spring one. An Interceptor only sees requests that already made it to the DispatcherServlet and were matched to a handler.</p>
+
+<h2>A filter in code</h2>
+<pre><code class="java">@Component
+@Order(1)
+public class RequestLoggingFilter implements Filter {
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        System.out.println("before: " + ((HttpServletRequest) request).getRequestURI());
+        chain.doFilter(request, response);       // pass to the next filter / servlet
+        System.out.println("after the response is produced");
+    }
+}</code></pre>
+<p>A filter must call <code>chain.doFilter(...)</code> to let the request continue; not calling it stops the request.</p>
+
+<h2>Multiple interceptors and ordering</h2>
+<p>Registered in order inside <code>addInterceptors</code>; <code>preHandle</code> runs in that order, <code>postHandle</code>/<code>afterCompletion</code> in reverse. If <code>preHandle</code> returns <code>false</code>, the next interceptor and the controller are not invoked.</p>
+<pre><code class="java">@Configuration
+public class AppConfig implements WebMvcConfigurer {
+    @Autowired MyCustomInterceptor1 myCustomInterceptor1;
+    @Autowired MyCustomInterceptor2 myCustomInterceptor2;
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        // below order is maintained while calling the interceptors
+        registry.addInterceptor(myCustomInterceptor1)
+                .addPathPatterns("/api/*")                                   // apply to these URL patterns
+                .excludePathPatterns("/api/updateUser", "/api/deleteUser");  // exclude for these
+        registry.addInterceptor(myCustomInterceptor2)
+                .addPathPatterns("/api/*")
+                .excludePathPatterns("/api/updateUser");
+    }
+}</code></pre>
+
+<div class="box extra"><strong>Which one should I use?</strong>
+<ul>
+<li><b>Filter:</b> security (Spring Security is itself a chain of filters), CORS, compression, request/response logging or rewriting the raw request body, anything independent of Spring MVC.</li>
+<li><b>Interceptor:</b> logic that needs to know <b>which controller method</b> will run (<code>HandlerMethod</code>, its annotations), timing of handlers, per-endpoint checks.</li>
+<li><b>AOP</b> (the earlier chapter) works at the <b>method level of any bean</b>, not only web requests.</li>
+<li>Filters can wrap the request/response objects (for example to cache the body); interceptors cannot replace them.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Filter vs Interceptor?</summary><p>Filter belongs to the servlet container and runs before the DispatcherServlet; interceptor belongs to Spring MVC and runs after the handler is chosen, before and after the controller. Interceptors know the handler method; filters don't.</p></details>
+<details><summary>Which runs first?</summary><p>Filters, then the DispatcherServlet, then interceptors, then the controller. On the way out the order reverses.</p></details>
+<details><summary>Where does Spring Security plug in?</summary><p>As a filter chain (<code>DelegatingFilterProxy</code> / <code>FilterChainProxy</code>), so it runs before any interceptor.</p></details>
+</div>

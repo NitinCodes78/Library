@@ -1,0 +1,249 @@
+<h1>JPA: Derived Queries, JPQL and the N+1 Problem (Part 8)</h1>
+<p class="kicker">Custom repository methods: derived queries, pagination and sorting, JPQL with joins, JOIN FETCH, @BatchSize, @EntityGraph, @Modifying and @NamedQuery.</p>
+
+<p>Till now our repository looks like this and the service only calls methods already provided by the framework:</p>
+<pre><code class="java">@Repository
+public interface UserDetailsRepository extends JpaRepository&lt;UserDetails, Long&gt; { }
+
+public UserDetails saveUser(UserDetails user) { return userDetailsRepository.save(user); }
+public UserDetails findByID(Long primaryKey) { return userDetailsRepository.findById(primaryKey).get(); }</code></pre>
+
+<h2>Derived queries</h2>
+<ul>
+<li>Spring Data <b>automatically generates the query from the method name</b>.</li>
+<li>You must follow a specific <b>naming convention</b>.</li>
+<li>Derived queries are used for <b>GET / REMOVE</b> operations, not for INSERT/UPDATE. Insert and update are supported through <code>save()</code>.</li>
+</ul>
+<p>The method name is parsed by <code>PartTree</code> using a pattern like:</p>
+<pre><code>^(find|read|get|query|search|stream|count|exists|delete|remove)((\p{Lu}.*?))??By</code></pre>
+<p>That means the name must start with one of <code>find / read / get / query / search / stream / count / exists / delete / remove</code>, then zero or more characters (starting with an uppercase letter, for example <code>UserDetails</code>), and then <b><code>By</code></b>, followed by the conditions.</p>
+<pre><code class="java">@Entity
+@Table(name = "user_details")
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long userId;
+    @Column(name = "user_name")
+    private String name;
+    private String phone;
+}
+
+@Repository
+public interface UserDetailsRepository extends JpaRepository&lt;UserDetails, Long&gt; {
+    List&lt;UserDetails&gt; findUserDetailsByName(String userName);
+}</code></pre>
+<p>It translates to <code>select ud1_0.user_id, ud1_0.user_name, ud1_0.phone from user_details ud1_0 where ud1_0.user_name=?</code>.</p>
+
+<h3>Different use cases</h3>
+<table>
+<tr><th>Keyword</th><th>Method</th><th>Generated condition</th></tr>
+<tr><td>And</td><td><code>findByNameAndPhone(n, p)</code></td><td><code>where user_name=? and phone=?</code></td></tr>
+<tr><td>Or</td><td><code>findByNameAndPhoneOrUserId(n, p, id)</code></td><td><code>where user_name=? and phone=? or user_id=?</code></td></tr>
+<tr><td>In</td><td><code>findByNameIn(List names)</code></td><td><code>where user_name in (?)</code></td></tr>
+<tr><td>Like / StartingWith</td><td><code>findByNameStartingWith(prefix)</code></td><td><code>where user_name like ? escape '\'</code></td></tr>
+<tr><td>Others</td><td><code>EndingWith, Containing, IsNull, Not, GreaterThan, LessThan, Between, OrderBy, True/False, IgnoreCase</code></td><td>as the names say</td></tr>
+</table>
+<p><b>Delete</b> needs the <code>@Transactional</code> annotation:</p>
+<pre><code class="java">@Transactional
+void deleteByName(String userName);</code></pre>
+<p>It first selects the matching rows and then issues a delete for each.</p>
+
+<h3>Pagination and sorting</h3>
+<p>Spring Data provides two types in <code>org.springframework.data.domain</code>: <b><code>Pageable</code></b> (page number, page size = records per page) and <b><code>Sort</code></b>.</p>
+<pre><code class="java">@Repository
+public interface UserDetailsRepository extends JpaRepository&lt;UserDetails, Long&gt; {
+    List&lt;UserDetails&gt; findUserDetailsByNameStartingWith(String userName, Pageable pageable);
+}
+
+public List&lt;UserDetails&gt; findByNameDerived(String name) {
+    Pageable pageable = PageRequest.of(1, 3);            // page index (starts at 0), size 3
+    return userDetailsRepository.findUserDetailsByNameStartingWith(name, pageable);
+}</code></pre>
+<p>The SQL ends with <code>offset ? rows fetch first ? rows only</code>. If you need more information about the pages, use <b><code>Page</code></b> as the return type:</p>
+<pre><code class="java">Page&lt;UserDetails&gt; findUserDetailsByNameStartingWith(String userName, Pageable page);
+
+Page&lt;UserDetails&gt; userDetailsPage = userDetailsRepository.findUserDetailsByNameStartingWith(name, pageable);
+List&lt;UserDetails&gt; list = userDetailsPage.getContent();
+System.out.println("total pages: " + userDetailsPage.getTotalPages());
+System.out.println("is first page: " + userDetailsPage.isFirst());
+System.out.println("is last page: " + userDetailsPage.isLast());</code></pre>
+<p>With 5 matching rows and page size 3, page index 1 gives total pages 2, is first false, is last true. (<code>Page</code> fires an additional <code>count</code> query; <code>Slice</code> skips it.)</p>
+
+<h4>Sorting only, and pagination with sorting</h4>
+<pre><code class="java">List&lt;UserDetails&gt; findUserDetailsByNameStartingWith(String userName, Sort sort);
+
+userDetailsRepository.findUserDetailsByNameStartingWith(name, Sort.by("name").descending());
+userDetailsRepository.findUserDetailsByNameStartingWith(name, Sort.by("name", "phone").ascending());</code></pre>
+<ul>
+<li><code>Sort.by</code> accepts <b>multiple fields</b>; sorting is applied in order: first by the first field, and if there are duplicates then the second field is used, and so on.</li>
+<li>For a different order per field:</li>
+</ul>
+<pre><code class="java">Sort sort = Sort.by(
+    Sort.Order.asc("name"),
+    Sort.Order.desc("phone")
+);
+return userDetailsRepository.findUserDetailsByNameStartingWith(name, sort);
+
+// both together
+Pageable pageable = PageRequest.of(0, 3, Sort.by("name").ascending());</code></pre>
+
+<h2>JPQL</h2>
+<p>For queries which are a little complex and cannot be handled by a derived query, use <b>JPQL (Java Persistence Query Language)</b>.</p>
+<ul>
+<li>Similar to SQL but works on <b>entity objects</b> instead of directly on the database.</li>
+<li><b>Database independent.</b></li>
+<li>Works with entity names and field names, <b>not table and column names</b>.</li>
+</ul>
+<pre><code class="java">@Query("SELECT u FROM UserDetails u WHERE u.name = :userFirstName")
+List&lt;UserDetails&gt; findByUserName(@Param("userFirstName") String userName);</code></pre>
+<ul>
+<li><code>UserDetails</code> is an entity (not a table name); <code>u</code> is the alias and selecting it returns all fields; <code>u.name</code> is the entity field (not a column name).</li>
+<li><code>:userFirstName</code> is a named parameter, bound to the method parameter by <code>@Param</code>.</li>
+<li>There is no strict rule for the return type: a <code>List</code> or a single object. But if more than one row comes back and the return type is a single object, JPA throws an exception (<code>IncorrectResultSizeDataAccessException</code>).</li>
+</ul>
+
+<h3>JPQL with JOIN</h3>
+<p><b>OneToOne:</b></p>
+<pre><code class="java">@Query("SELECT ud FROM UserDetails ud JOIN ud.userAddress ad WHERE ud.name = :userFirstName")
+List&lt;UserDetails&gt; findUserDetailsWithAddress(@Param("userFirstName") String userName);</code></pre>
+<p>SQL: <code>from user_details ud1_0 join user_address ua1_0 on ua1_0.id = ud1_0.user_address_id where ud1_0.user_name=?</code>.</p>
+<p>To select only some fields, return <code>List&lt;Object[]&gt;</code>:</p>
+<pre><code class="java">@Query("SELECT ud.name, ad.country FROM UserDetails ud JOIN ud.userAddress ad WHERE ud.name = :userFirstName")
+List&lt;Object[]&gt; findUserDetailsWithAddress(@Param("userFirstName") String userName);
+
+public List&lt;UserDTO&gt; findByNameDerived(String name) {
+    List&lt;Object[]&gt; dbOutput = userDetailsRepository.findUserDetailsWithAddress(name);
+    List&lt;UserDTO&gt; output = new ArrayList&lt;&gt;();
+    for (Object[] val : dbOutput) {
+        String userName = (String) val[0];
+        String country = (String) val[1];
+        output.add(new UserDTO(userName, country));
+    }
+    return output;
+}</code></pre>
+<p>If we do not want <code>Object[]</code>, we can return a custom DTO directly with a constructor expression: <code>SELECT new com.example.UserDTO(ud.name, ad.country) FROM ...</code> (or an interface projection).</p>
+<p><b>OneToMany:</b> the same syntax:</p>
+<pre><code class="java">@Entity @Table(name = "user_details")
+public class UserDetails {
+    ...
+    @OneToMany(cascade = CascadeType.ALL)
+    @JoinColumn(name = "user_id")
+    private List&lt;UserAddress&gt; userAddressList = new ArrayList&lt;&gt;();
+}
+
+@Query("SELECT ud FROM UserDetails ud JOIN ud.userAddressList ad WHERE ud.name = :userFirstName")
+List&lt;UserDetails&gt; findUserDetailsWithAddress(@Param("userFirstName") String userName);</code></pre>
+
+<h2>The N+1 problem and its solutions</h2>
+<h3>Problem</h3>
+<p>Say one user can have many addresses, and our query can fetch more than one user. With <b>N users</b> JPA fires:</p>
+<ul>
+<li><b>1</b> query to fetch all the users;</li>
+<li>for each user, a query to fetch its addresses, so <b>N</b> more.</li>
+</ul>
+<p>Total queries hit: <b>N + 1</b>. We need a way to hit just one.</p>
+<div class="flow"><b>1 query</b><i>users</i><b>N users</b><i>+ N queries</i><b>addresses per user</b></div>
+<p>Example: two users named "AA" with two address rows. The JPQL above returns 2 users; for each user Hibernate fires a separate <code>select ... from user_address where user_id=?</code>, so 2 selects on the child table (in total 3 queries).</p>
+<h4>Can EAGER fetching solve it?</h4>
+<p><b>No.</b> EAGER works as a single join query only when we fetch <b>one parent</b> by id (like <code>findById</code>): JPA drafts a join. When a query fetches <b>multiple parents</b> each with multiple children, EAGER does not collapse into one query: it first fetches all the parents, then for each parent fetches its children, which is the same N+1.</p>
+
+<h3>Solution 1: JOIN FETCH (JPQL)</h3>
+<pre><code class="java">@Query("SELECT ud FROM UserDetails ud JOIN FETCH ud.userAddressList ad WHERE ud.name = :userFirstName")
+List&lt;UserDetails&gt; findUserDetailsWithAddress(@Param("userFirstName") String userName);</code></pre>
+<p>Now one SQL with a join returns users and addresses together: <b>1 query</b>.</p>
+
+<h3>Solution 2: @BatchSize(size = 10)</h3>
+<ul>
+<li>It will not make it only 1 query, but it <b>reduces</b> the count by dividing the loading into batches.</li>
+</ul>
+<pre><code class="java">@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+@JoinColumn(name = "user_id")
+@BatchSize(size = 10)
+private List&lt;UserAddress&gt; userAddressList = new ArrayList&lt;&gt;();</code></pre>
+<p>Instead of one query per user, Hibernate fetches children with <code>where user_id in (?, ?, ...)</code> for up to 10 parents at a time: N users need about 1 + N/10 queries.</p>
+
+<h3>Solution 3: @EntityGraph</h3>
+<ul>
+<li>Used over the method (helpful with derived methods).</li>
+<li>Tells JPA to fetch all the <code>UserAddress</code> entries along with the user details.</li>
+</ul>
+<pre><code class="java">@EntityGraph(attributePaths = "userAddressList")
+List&lt;UserDetails&gt; findUsersBy();</code></pre>
+
+<h3>Joining many tables</h3>
+<p>It is almost the same as SQL. Table A has a one-to-many with B, and B has a one-to-many with C:</p>
+<pre><code class="java">@Query("SELECT a FROM A a JOIN a.bList b JOIN b.cList c WHERE c.someProperty = :someValue")
+List&lt;A&gt; findAWithBAndC(@Param("someValue") String someValue);</code></pre>
+
+<h2>@Modifying</h2>
+<ul>
+<li>When <code>@Query</code> is used, JPA by default expects a <b>SELECT</b>.</li>
+<li>If we use <code>DELETE</code>, <code>UPDATE</code> or <code>INSERT</code> with <code>@Query</code>, JPA throws an error.</li>
+<li><code>@Modifying</code> tells JPA to expect a DELETE/UPDATE (or INSERT) query.</li>
+<li>Since we are changing the DB we also need <code>@Transactional</code>.</li>
+</ul>
+<pre><code class="java">@Modifying
+@Query("DELETE FROM UserDetails ud WHERE ud.name = :userFirstName")
+void deleteByUserName(@Param("userFirstName") String userName);</code></pre>
+
+<h3>flush and clear with @Modifying</h3>
+<ul>
+<li><b>flush</b> pushes the persistence-context changes to the DB but keeps the values in the persistence context.</li>
+<li><b>clear</b> purges the persistence context, so a fresh DB call is needed afterwards.</li>
+</ul>
+<p>A bulk JPQL delete goes straight to the DB and <b>bypasses the persistence context</b>. Test: <code>findById(id)</code> to load the user, call <code>deleteByUserName(name)</code> (delete fires), then <code>findById(id)</code> again: the entity is still in the first-level cache, so the output says <code>present: true</code> although the row is gone. Fix it:</p>
+<pre><code class="java">@Modifying(flushAutomatically = true, clearAutomatically = true)
+@Query("DELETE FROM UserDetails ud WHERE ud.name = :userFirstName")
+void deleteByUserName(@Param("userFirstName") String userName);</code></pre>
+<ul>
+<li><code>flushAutomatically = true</code>: pending changes are flushed to the DB <b>before</b> the query runs.</li>
+<li><code>clearAutomatically = true</code>: the persistence context is cleared <b>after</b> it, so the next read hits the DB (and finds nothing).</li>
+</ul>
+
+<h2>Pagination and sorting in JPQL</h2>
+<p>Same as in derived queries: add a <code>Pageable</code> (or <code>Sort</code>) parameter.</p>
+<pre><code class="java">@Query("SELECT ud FROM UserDetails ud WHERE ud.name = :userFirstName")
+List&lt;UserDetails&gt; findUserDetails(@Param("userFirstName") String userName, Pageable pageable);
+
+public List&lt;UserDetails&gt; findByUserName(String name) {
+    Pageable page = PageRequest.of(0, 2);
+    return userDetailsRepository.findUserDetails(name, page);
+}</code></pre>
+<p>The SQL gets <code>fetch first 2 rows only</code> (with an offset for later pages).</p>
+
+<h2>@NamedQuery</h2>
+<p>We can <b>name</b> a query so it can be reused.</p>
+<pre><code class="java">@Table(name = "user_details")
+@Entity
+@NamedQuery(name = "UserDetails.findByUserName",
+            query = "SELECT u FROM UserDetails u WHERE u.name = :userFirstName")
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long userId;
+    @Column(name = "user_name")
+    private String name;
+    private String phone;
+    @OneToOne(cascade = CascadeType.ALL)
+    private UserAddress userAddress;
+}
+
+// repository: the method name matches "Entity.methodName"
+List&lt;UserDetails&gt; findByUserName(@Param("userFirstName") String userName);</code></pre>
+<p>Spring Data looks for a named query called <code>&lt;EntityName&gt;.&lt;methodName&gt;</code> before deriving one from the method name.</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><code>JOIN FETCH</code> combined with pagination makes Hibernate paginate <b>in memory</b> (it logs a HHH000104 warning), which is dangerous for big tables. For paged collections prefer <code>@BatchSize</code> or a two-step query (ids first, then fetch).</li>
+<li>Fetching two <code>List</code> collections together in one query gives <code>MultipleBagFetchException</code>; use <code>Set</code>s or fetch them separately.</li>
+<li>The count query for <code>Page</code> can be customised with <code>countQuery</code> in <code>@Query</code>.</li>
+<li>Native SQL is available via <code>@Query(value = "...", nativeQuery = true)</code> when JPQL cannot express it, but it ties you to the database.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What is the N+1 problem and how do you fix it?</summary><p>One query for the parents plus one per parent for lazily/eagerly loaded children. Fix with JOIN FETCH, @EntityGraph, or @BatchSize.</p></details>
+<details><summary>Why doesn't EAGER fix N+1?</summary><p>For a multi-parent query Hibernate still loads children with separate selects; EAGER only decides <i>when</i>, not <i>how many</i> queries.</p></details>
+<details><summary>Why do @Modifying queries need @Transactional, and what are flushAutomatically / clearAutomatically?</summary><p>They change data. flush writes pending changes before the bulk query; clear drops stale entities from the first-level cache afterwards.</p></details>
+<details><summary>Derived query vs JPQL vs native?</summary><p>Derived: simple conditions by method name. JPQL: complex, entity-based and DB independent. Native: DB-specific SQL when needed.</p></details>
+<details><summary>Page vs Slice vs List?</summary><p>Page adds a count query and totals; Slice only knows if a next page exists; List just returns the rows.</p></details>
+</div>

@@ -1,0 +1,350 @@
+<h1>Modern Java: Sealed, Switch, Pattern Matching, Records, Text Blocks</h1>
+<p class="kicker">Java 14 to 21 features, each one aimed at removing a pain point.</p>
+
+<h2>Java 17: Sealed classes and interfaces</h2>
+<h3>The problem</h3>
+<p>The biggest problem is <b>lack of control in inheritance</b>.</p>
+<div class="diag">
+<div class="row"><div class="cb">Shape</div></div>
+<div class="row"><div class="cb sm">Circle</div><div class="cb sm">Rectangle</div><div class="cb sm">Triangle</div></div>
+<div class="row"><div class="cb sm">ColoredCircle</div></div>
+<div class="row"><div class="cb sm">RedCircle</div><div class="cb sm">GreenCircle</div></div>
+<div class="row"><div class="cb sm">RotatingCircle</div></div></div>
+<p>It is not possible to control the hierarchy: <b>any class can join it</b> by implementing the interface or extending the class, even if we did not plan for it (for example, we didn't plan for "RotatingCircle"). So how do we bring control over who can extend or implement an interface or class? Through <b>sealed classes/interfaces</b>: it can be subclassed only by its own <code>permits</code> list.</p>
+<pre><code class="java">public sealed interface Shape permits Circle, Rectangle { }
+
+public final class Circle implements Shape { }              // "final" tells it can't be subclassed further
+
+public non-sealed class Rectangle implements Shape { }      // "non-sealed" removes all restriction: can be subclassed freely
+// (could have used sealed + permits here also)</code></pre>
+<h3>Rules to consider</h3>
+<ol>
+<li>A <code>permits</code> type should be a <b>direct subclass</b> of the sealed interface or class.</li>
+<li>A <code>permits</code> type should be either <code>final</code>, <code>sealed</code> or <code>non-sealed</code>.</li>
+<li>All <code>permits</code> types should be present (future classes or interfaces are not considered).</li>
+</ol>
+<div class="box extra"><strong>Good to know</strong>
+<p>If subclasses are in the same file, <code>permits</code> can be omitted. Records and enums are implicitly final, so they are ideal permitted types. Sealed types shine with pattern-matching switch: the compiler knows all subtypes, so no <code>default</code> is needed (exhaustive).</p></div>
+
+<h2>Switch expressions (Java 14 onwards)</h2>
+<p>They solved many problems of the old switch statement. (Basic <code>yield</code> was also met in the Operators chapter.)</p>
+<h3>1. Multiple lines of case stacking</h3>
+<div class="diag"><div class="row">
+<div class="cb wide"><b>Old switch statement</b><br><small>each case needs its own line</small><br><code>switch (day) {<br>&nbsp;case MONDAY:<br>&nbsp;case FRIDAY:<br>&nbsp;case SUNDAY:<br>&nbsp;&nbsp;System.out.println(6);<br>&nbsp;&nbsp;break;<br>&nbsp;case TUESDAY:<br>&nbsp;&nbsp;System.out.println(7);<br>&nbsp;&nbsp;break;<br>}</code></div>
+<div class="cb wide"><b>Java 14 switch</b><br><small>comma-separated case grouping</small><br><code>switch (day) {<br>&nbsp;case MONDAY, FRIDAY, SUNDAY:<br>&nbsp;&nbsp;System.out.println(6);<br>&nbsp;&nbsp;break;<br>&nbsp;case TUESDAY:<br>&nbsp;&nbsp;System.out.println(7);<br>&nbsp;&nbsp;break;<br>}</code></div></div></div>
+
+<h3>2. Fall-through by default</h3>
+<pre><code class="java">// old switch statement
+switch (day) {
+    case MONDAY:
+    case FRIDAY:
+        System.out.println(6);
+    case TUESDAY:                 // missed "break"
+        System.out.println(7);
+        break;
+    case WEDNESDAY:
+        System.out.println(10);
+        break;
+}
+// day = FRIDAY: it prints 6 and 7. It found break only after printing 7.
+
+// Java 14: arrow form
+switch (day) {
+    case MONDAY, FRIDAY -&gt; System.out.println(6);
+    case TUESDAY        -&gt; System.out.println(7);
+    case WEDNESDAY      -&gt; System.out.println(10);
+}</code></pre>
+<p>The new form of switch label, i.e. <code>case L -&gt;</code>, tells that <b>only the code to the right of the label needs to be executed</b> if the label is matched. No need to add <code>break</code> for each case now.</p>
+
+<h3>3. No return value</h3>
+<pre><code class="java">int count = switch (day) {              // Java 14: switch is now an expression
+    case MONDAY, FRIDAY -&gt; 6;
+    case TUESDAY        -&gt; 7;
+    case WEDNESDAY      -&gt; 9;
+};</code></pre>
+<p>If there is a block, we can use <code>yield</code>:</p>
+<pre><code class="java">int count = switch (day) {
+    case MONDAY, FRIDAY, SUNDAY -&gt; {
+        if (day == Days.SUNDAY) {
+            throw new RuntimeException("...");
+        }
+        yield 6;
+    }
+    case TUESDAY   -&gt; 7;
+    case WEDNESDAY -&gt; 9;
+};</code></pre>
+
+<h3>4. No exhaustiveness check</h3>
+<p><b>Old switch:</b> the compiler doesn't force us to cover all values. <b>Java 14 switch:</b> when we use switch as an <b>expression</b>, the compiler will force us to cover all the cases.</p>
+<pre><code class="java">Days day = Days.FRIDAY;
+int count = switch (day) {
+    case MONDAY   -&gt; 6;
+    case THURSDAY -&gt; 8;
+};   // error: the switch expression does not cover all possible values
+// so we should use default:
+//     default -&gt; 0;</code></pre>
+
+<h3>5. All case blocks share the same scope</h3>
+<pre><code class="java">// old switch statement
+switch (day) {
+    case MONDAY:
+        String stringVal = "Monday";
+        System.out.println(stringVal);
+        break;
+    case TUESDAY:
+        String stringVal = "Tuesday";   // error: variable is already defined
+        break;
+}
+// in order to solve this problem, use blocks:  case MONDAY: { ... }
+
+// Java 14: each 'case' with '-&gt;' is treated as an independent scope
+String msg = switch (day) {
+    case MONDAY  -&gt; { String val = "..."; yield val; }
+    case TUESDAY -&gt; { String val = "..."; yield val; }
+    default      -&gt; "others";
+};</code></pre>
+<h3>Old-style <code>case L:</code> with the new feature</h3>
+<pre><code class="java">int day = 1;
+String typeOfDay = switch (day) {
+    case 1, 7:
+        yield "end";
+    case 2, 3, 4, 5, 6:
+        yield "day";
+    default:
+        yield "Invalid";
+};</code></pre>
+<ul>
+<li>Before Java 14, old cases could not return values. Now they can, via <code>yield</code>.</li>
+<li>We still need <code>break</code> if it's just a statement switch (not returning), else it will <b>fall through</b>.</li>
+</ul>
+
+<h2>Java 16: Pattern matching for instanceof</h2>
+<pre><code class="java">// old way: extra overhead of doing the type casting
+if (obj instanceof String) {
+    String s = (String) obj;            // type casting
+    System.out.println(s.toUpperCase());
+}
+
+// Java 16
+Object obj = "hello world";
+if (obj instanceof String s) {          // block scope only of s
+    System.out.println(s.toUpperCase());
+}
+// 1. first the comparison happens
+// 2. if true, then s is automatically type cast and initialized</code></pre>
+<p>Can we use <code>&amp;&amp;</code>? Yes:</p>
+<pre><code class="java">if (obj instanceof Integer i &amp;&amp; i &lt; 10) { ... }
+
+Object obj = new TwoWheeler();
+if (obj instanceof Vehicle vehicleObj) {      // Vehicle: an interface that TwoWheeler implements
+    vehicleObj.drive();
+}</code></pre>
+<p><b>Scope:</b> the binding variable exists only where the compiler can prove the match succeeded: inside the true branch, or the rest of the expression after <code>&amp;&amp;</code>. <code>obj instanceof Integer i || i &lt; 10</code> does <b>not</b> compile.</p>
+
+<h2>Java 21: Pattern matching for switch</h2>
+<p>It supports <b>all that the classic switch can</b> (no change in that), plus <b>pattern matching for objects</b>: classes, interfaces, abstract types, wrapper objects.</p>
+<pre><code class="java">Object obj = "hello world";
+switch (obj) {
+    case String s:                         // scope limited to this block only
+        System.out.println("String: " + s);   // s is automatically cast
+        break;
+    case Integer i:
+        System.out.println(i);
+        break;
+    default:
+        System.out.println("other type");
+}</code></pre>
+<h3>With enum</h3>
+<pre><code class="java">// old way
+Object obj = Color.RED;
+switch (obj) {
+    case Color.RED:   System.out.println("Red");   break;
+    case Color.GREEN: System.out.println("Green"); break;
+    default:          System.out.println("other");
+}
+
+// new way
+switch (obj) {
+    case Color c:
+        System.out.println(c.name());
+        break;
+    default:
+        System.out.println("other");
+}</code></pre>
+<p><b>Pattern-matching switch is not null-safe by default: it throws <code>NullPointerException</code> on null unless you add <code>case null</code>.</b></p>
+<pre><code class="java">Object obj = null;
+switch (obj) {
+    case String s: System.out.println(s); break;
+    case null:     System.out.println("null");  // without this line: NPE (plain default does not match null)
+    default:       System.out.println("");
+}</code></pre>
+<p><b>Not possible:</b></p>
+<pre><code class="java">Shape obj = new Circle();
+switch (obj) {
+    case Circle c:           // dominance problem
+    case Square s: ...
+}</code></pre>
+<p>Because here the compiler will be confused with case labels where more than one is valid (for example a general type placed before a more specific one, which makes the later label unreachable).</p>
+<ul>
+<li>Pattern-matching switch was a <b>preview</b> in Java 17&ndash;20 and <b>final in Java 21</b>.</li>
+<li>A pattern switch <b>throws NPE on null unless you add <code>case null</code></b> (which may be combined: <code>case null, default -&gt;</code>); the plain <code>default</code> does <b>not</b> match null. Old (non-pattern) switches always threw NPE on null.</li>
+<li>Dominance rule: put the <b>more specific</b> case first. Guards use <code>when</code>: <code>case Integer i when i &gt; 10 -&gt; ...</code>.</li>
+<li>With a sealed interface, covering all permitted subtypes makes <code>default</code> unnecessary.</li>
+</ul>
+
+<h2>Java 16: Records</h2>
+<h3>The problem first</h3>
+<p>To create an immutable class, which is required as simply a data carrier (like a POJO), we need to write this code:</p>
+<pre><code class="java">public final class User {
+    private final String name;
+    private final int age;
+
+    // no setter methods, initialized via constructor only
+    public User(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    // only getter methods available
+    public String getName() { return name; }
+    public int getAge() { return age; }
+    // and generally we also provide equals, hashCode and toString methods
+}</code></pre>
+<p>Lots of boilerplate code, just for a basic immutable POJO class. That's where Java 16 Records come into the picture.</p>
+<p><b>But wait:</b> Lombok helps in reducing boilerplate like automatic generation of getters and setters, equals, hashCode, constructor, toString and immutable class (via <code>@Value</code>). Then why Records? (First understand how it works.)</p>
+
+<h3>Records</h3>
+<ul>
+<li>It helps us create an <b>immutable class in a short way</b>.</li>
+<li>It is mostly designed to <b>reduce boilerplate for data-carrying classes</b> (like POJO).</li>
+</ul>
+<pre><code class="java">// syntax: record YourRecordName(Type field1, Type field2) { }
+public record User(String name, int age) { }       // (name, age) = the record components</code></pre>
+<p>It is equivalent to a POJO with a constructor, getter methods, <code>equals()</code>, <code>hashCode()</code> and <code>toString()</code>. <b>No setter methods.</b> The record is a <b>final class</b>; access modifier rules are similar to a normal class (it can be a private record when it is a nested one, as the outermost class is always public or package-private).</p>
+<ul>
+<li>All record classes by default extend <code>java.lang.Record</code> implicitly, because Java can identify "User" is a record only via the superclass. Internally <code>getSuperclass() == java.lang.Record.class</code>.</li>
+<li>That's why <b><code>extends</code> is not allowed on a record</b> (no multiple inheritance). But we can <b>implement</b> more than one interface like any other normal class.</li>
+<li>It generates <b>private final</b> fields, generally called <b>record components</b>.</li>
+<li>We <b>cannot add more instance fields</b>. All instance fields must be defined in the record header only, so that by just seeing the record we can find what this record is carrying.</li>
+<li><b>Static fields are allowed</b>, as they don't belong to an individual instance. So each User object is still immutable.</li>
+</ul>
+<pre><code class="java">public record User(String name, int age) {
+    String lastName;            // not allowed: instance field
+    static int count = 0;       // allowed
+}</code></pre>
+<p>Records do <b>not</b> generate <code>getName()</code>; the accessors are named after the component: <code>user.name()</code> and <code>user.age()</code>. "Immutable" is also shallow: if a component is a mutable <code>List</code>, the list itself can still change (use <code>List.copyOf</code> in the constructor).</p>
+
+<h3>Constructors in records</h3>
+<ul>
+<li>A <b>canonical constructor</b> (takes all record components, in order) is generated automatically.</li>
+<li>We can override the canonical constructor if we want:</li>
+</ul>
+<pre><code class="java">public User(String name, int age) {
+    if (age &lt; 0) throw new IllegalArgumentException();
+    this.name = name;               // required
+    this.age = age;
+}</code></pre>
+<ul>
+<li>We can have a <b>compact constructor</b>, a shorthand form of the canonical constructor. The compiler implicitly assumes the parameters are the record components in the declared order, and assigns the fields at the end.</li>
+</ul>
+<pre><code class="java">public User {
+    if (age &lt; 0) throw new IllegalArgumentException();
+    // compiler does this.name = name; this.age = age;
+}</code></pre>
+<p>We can also add another constructor, but it must delegate to the canonical one:</p>
+<pre><code class="java">public User(int age) {
+    this("defaultName", age);      // internally we have to call the canonical constructor
+}</code></pre>
+<p>For a <b>public record</b>, the canonical constructor must be public. If it is a default (package-private) record, then the constructor can be default or public: you can't restrict a constructor more than the record itself. We can also override <code>equals</code>, <code>hashCode</code> and <code>toString</code>.</p>
+
+<h3>Nested records</h3>
+<p>In records, we can also create nested records, which can be private/protected/public like nested classes. But the difference is: <b>only static nested records are possible</b> (they are implicitly static); non-static nested records are not.</p>
+<pre><code class="java">public record User(/* ... */) {
+    record NestedRecord() {             // by default static only
+        public void display() { }
+    }
+}
+// access it similar to nested classes
+User.NestedRecord ao = new User.NestedRecord();
+ao.display();</code></pre>
+<p><b>Why only static nested records?</b> One view: a record is a <b>transparent data carrier</b>, meaning all its fields must be defined in the record header. Say <code>record User(String a) { record Address(String b) {} }</code>. If the nested record were non-static it could access parent fields, so internally Address would contain a hidden reference <code>private final User outer</code>. That violates the promise of records: the state of Address isn't fully declared in <code>record Address(String b)</code>, it carries extra invisible state (the User object), and that breaks the transparency principle.</p>
+
+<h3>Local records</h3>
+<ol>
+<li>Similar to local classes, we can create local records: records within a block like a method block, while-loop block, if-condition block.</li>
+<li>Access modifier rules are similar to local classes: a local record can't be declared public/private/protected, because its scope is limited to the block.</li>
+<li>It can't be used outside of the block.</li>
+<li>There are no static local records, because static belongs to a class, but a local record's scope is a block, not a class (they are implicitly static, so they can't capture local variables).</li>
+</ol>
+<pre><code class="java">public void printAddress(String city, String country) {
+    // a local record only for this method
+    record Address(String city, String country) {
+        public String fullAddress() {
+            return city + ", " + country;
+        }
+    }
+    Address address = new Address(city, country);
+    System.out.println(address.fullAddress());
+}</code></pre>
+<p><b>Lombok is via adding a dependency, but Java internally supports Records.</b> Lombok doesn't restrict setter methods (a Lombok @Data class stays mutable), whereas a record guarantees there are none.</p>
+
+<h2>Java 15: Text blocks</h2>
+<p>Two common use-cases for multi-line strings in Java code:</p>
+<pre><code class="java">String query = "SELECT e.id, e.name \n"
+             + "FROM employees e \n"
+             + "WHERE e.salary &gt; 6000 \n"
+             + "ORDER BY e.name ASC;";
+
+String jsonString = "{\n"
+                  + "  \"name\": \"Shreyansh Jain\", \n"
+                  + "  \"country\": \"India\", \n"
+                  + "  \"profession\": \"Software Engineer\" \n"
+                  + "}";</code></pre>
+<p>Difficult to read due to newline characters, escape characters and string concatenation (so many special characters). We can't simply try running the SQL query, and it is difficult to debug.</p>
+<h3>Solution: text block</h3>
+<ul>
+<li>It is <b>finalized in Java 15</b>.</li>
+<li>It's a multi-line string literal used to make writing and reading multi-line text easier. It starts and ends with <b>three double quotes</b> (<code>"""</code>).</li>
+</ul>
+<pre><code class="java">String query = """
+    SELECT e.id, e.name
+    FROM employees e
+    WHERE e.salary &gt; 6000
+    ORDER BY e.name ASC;
+    """;
+
+String jsonString = """
+    {
+      "name": "Shreyansh Jain",
+      "country": "India",
+      "profession": "Software Engineer"
+    }
+    """;</code></pre>
+<p>Internally, a text block (<code>"""</code>) is compiled into a <b>regular String object</b> only (in the class file we'll see the same thing as we had written before).</p>
+<h3>Certain rules</h3>
+<ol>
+<li>After the opening delimiter (<code>"""</code>), text or content is <b>not allowed on the same line</b>: <code>"""{</code> is wrong (&#10007;); put the content on the next line (&#10003;).</li>
+<li><b>Preserving trailing white space</b> (the notes' example): a trailing escape <code>\s</code> is preserved as a space, e.g. <code>"name": "Nitin",\s</code>.</li>
+<li><b>Continuation without adding a newline:</b> a backslash <code>\</code> at the end of a line joins lines:</li>
+</ol>
+<pre><code class="java">String text = """
+    This is a single line \
+    even though it looks \
+    like multiple lines.
+    """;</code></pre>
+<p>We can apply methods on text blocks like we do on Strings:</p>
+<pre><code class="java">String json = """
+    {
+      ...
+    }
+    """.toUpperCase();</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p>Incidental indentation (the common left margin) is stripped automatically, based on the closing <code>"""</code> position and the least-indented line. <code>formatted(...)</code> works for placeholders: <code>"""Hello %s""".formatted(name)</code>.</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What problem do sealed classes solve?</summary><p>Uncontrolled inheritance. You list exactly which classes may extend, which enables exhaustive pattern matching and safer domain models.</p></details>
+<details><summary>Record vs class vs Lombok @Value?</summary><p>Record: language-level, final, transparent, accessors like name(), cannot extend. Lombok @Value: library, generated getX(), can be customised more.</p></details>
+<details><summary>Switch statement vs switch expression?</summary><p>Statement uses colons and fall-through; the expression uses arrows, returns a value, no fall-through, and must be exhaustive.</p></details>
+<details><summary>What does pattern matching for instanceof save?</summary><p>The explicit cast: test and bind in one step.</p></details>
+<details><summary>Can a record have a setter, or extend a class?</summary><p>No setters (fields are final) and no extends (it already extends java.lang.Record); it may implement interfaces.</p></details>
+</div>

@@ -1,0 +1,183 @@
+<h1>Optional (Java 8 to 11)</h1>
+<p class="kicker">Say "this value may be absent" in the type itself.</p>
+
+<h2>The problem</h2>
+<pre><code class="java">User user = new UserRepository().findUserByID(1);
+System.out.println(user.getName());     // NullPointerException, because user is null</code></pre>
+<p>Methods generally return <code>null</code>, and if we forget to add a null check we get a <b>NullPointerException</b>. So we used to add null checks like <code>if (user != null)</code>.</p>
+
+<h2>Optional&lt;T&gt;</h2>
+<p><code>Optional&lt;User&gt;</code> as a return type tells the client that <b>the return value may or may not exist</b>.</p>
+<pre><code class="java">public Optional&lt;User&gt; findUserByID(int id) { ... }
+
+Optional&lt;User&gt; userOptional = new UserRepository().findUserByID(1);
+if (userOptional.isPresent()) {
+    User user = userOptional.get();
+    System.out.println(user.getName());
+}</code></pre>
+<p>Earlier we put a condition for the null check, and still we are using an <code>if</code> condition: what's the advantage?</p>
+<ol>
+<li><b>The API clearly says "value may be absent".</b> We don't need to guess whether the value can be null or not: if it's Optional, the value may or may not exist.</li>
+<li><b>The compiler forces us to handle the Optional return type.</b> <code>Optional&lt;User&gt; u = repo.findByID(1); System.out.println(u.getName());</code> does not compile.</li>
+<li>A null return type doesn't give us anything, while Optional provides <b>many utility methods</b> to handle the response: <code>isPresent()</code>, <code>ifPresent()</code>, <code>orElse()</code>, <code>orElseGet()</code> ...</li>
+</ol>
+
+<h2>Optional class structure</h2>
+<pre><code class="java">public final class Optional&lt;T&gt; {
+    private final T value;                                     // holds the actual value
+    private static final Optional&lt;?&gt; EMPTY = new Optional&lt;&gt;(null);   // shared empty instance
+
+    private Optional(T value) {                                // private constructor
+        this.value = value;
+    }
+}</code></pre>
+<ul>
+<li>Whenever we need to return an <b>empty Optional object</b>, it does not create a new object every time, it just uses <code>EMPTY</code>. Here the unknown type (<code>?</code> wildcard) holds a null value.</li>
+<li>The constructor is <b>private</b>: we can't do <code>new Optional()</code>. So it provides various methods for creation of an Optional object.</li>
+</ul>
+
+<h2>Creating an Optional</h2>
+<h3>1. Optional.of(value)</h3>
+<pre><code class="java">public static &lt;T&gt; Optional&lt;T&gt; of(T value) {
+    if (value == null) {
+        throw new NullPointerException("value must not be null");
+    }
+    return new Optional&lt;&gt;(value);       // invokes the private constructor
+}</code></pre>
+<p>It's a static method used to create a <b>non-empty</b> Optional object. If null is passed, it will throw NullPointerException.</p>
+<pre><code class="java">public Optional&lt;String&gt; getUserName(String value) {
+    return Optional.of(value);
+}</code></pre>
+<h3>2. Optional.ofNullable(value)</h3>
+<pre><code class="java">public static &lt;T&gt; Optional&lt;T&gt; ofNullable(T value) {
+    return value == null ? (Optional&lt;T&gt;) EMPTY : new Optional&lt;&gt;(value);
+}</code></pre>
+<p>The value may or may not contain a non-null value.</p>
+<h3>3. Optional.empty()</h3>
+<p>Returns a <b>shared, immutable</b> empty Optional instance, representing "no value present".</p>
+<pre><code class="java">public static &lt;T&gt; Optional&lt;T&gt; empty() {
+    Optional&lt;T&gt; t = (Optional&lt;T&gt;) EMPTY;       // type cast Optional&lt;?&gt; to specific Optional&lt;T&gt;
+    return t;
+}
+
+Optional&lt;String&gt;  s = Optional.empty();
+Optional&lt;Integer&gt; i = Optional.empty();</code></pre>
+
+<h2>Presence checking</h2>
+<pre><code class="java">public boolean isPresent() { return value != null; }     // that "final T value"
+public boolean isEmpty()   { return value == null; }     // Java 11</code></pre>
+
+<h2>Retrieving values</h2>
+<table>
+<tr><th>Method</th><th>Behaviour</th></tr>
+<tr><td><code>get()</code></td><td>Returns the value; <b>throws <code>NoSuchElementException("No value present")</code></b> if empty.</td></tr>
+<tr><td><code>orElse(T other)</code></td><td>Returns the value if present, else <code>other</code>.</td></tr>
+<tr><td><code>orElseGet(Supplier)</code></td><td>Returns the value if present, else <b>executes the lambda (supplier) to compute the default</b>. Use when the default value requires custom computation.</td></tr>
+<tr><td><code>orElseThrow()</code></td><td>Returns the value, else throws <code>NoSuchElementException</code> (Java 10).</td></tr>
+<tr><td><code>orElseThrow(Supplier)</code></td><td>Returns the value, else creates and throws <b>our custom exception</b>.</td></tr>
+</table>
+<pre><code class="java">// orElse
+Optional&lt;String&gt; usrNameOptional = Optional.of("Shreyansh");
+String output = usrNameOptional.orElse("defaultUsrName");      // returns Shreyansh
+
+// orElseGet
+Optional&lt;String&gt; usrNameOptional = Optional.empty();
+String output = usrNameOptional.orElseGet(() -&gt; {
+    return "default ...";                                        // this will return as it's empty
+});
+
+// orElseThrow(supplier)
+public &lt;X extends Throwable&gt; T orElseThrow(Supplier&lt;? extends X&gt; exceptionSupplier) throws X {
+    if (value != null) return value;
+    else throw exceptionSupplier.get();
+}
+usrNameOptional.orElseThrow(() -&gt; new IllegalArgumentException("User not found"));</code></pre>
+<p><b>orElse vs orElseGet:</b> the argument of <code>orElse(x)</code> is <b>always evaluated</b>, even when a value is present (so an expensive call or side effect inside it still runs). <code>orElseGet(() -&gt; x)</code> evaluates the supplier <b>only if empty</b>. Prefer <code>orElseGet</code> for anything non-trivial.</p>
+
+<h2>Transforming values</h2>
+<p><code>map(Function)</code>, <code>flatMap(Function)</code> and <code>filter(Predicate)</code>: conceptually similar to stream methods. But streams work on <b>0 to N elements</b> (a collection), whereas Optional works on <b>0 or 1 element</b> (Optional is a wrapper of only 1 value).</p>
+<pre><code class="java">Optional&lt;String&gt; outputOptional = Optional.of("Nitin");
+Optional&lt;Integer&gt; outputLen = outputOptional.map((String val) -&gt; {
+    int len = val.length();
+    return len;
+});
+System.out.println(outputLen.get());      // 5</code></pre>
+<p><b>Problem with Optional.map:</b> what if the function (lambda expression) is also returning an Optional? Then we get a nested Optional. <b>Use flatMap then.</b></p>
+<pre><code class="java">Optional&lt;Integer&gt; outputLen = outputOptional.flatMap((String val) -&gt; {
+    return Optional.of(val.length());
+});
+System.out.println(outputLen.get());      // 5 prints</code></pre>
+<h3>filter</h3>
+<p>In Optional, filter keeps the value <b>only if it matches the condition</b>, else it will return <code>Optional.empty()</code>.</p>
+<pre><code class="java">Optional&lt;String&gt; oo = Optional.of("Nitin");
+oo = oo.filter((String val) -&gt; {
+    return val.length() &gt; 3;
+});
+System.out.println(oo.isPresent());       // prints true</code></pre>
+
+<h2>Action-based methods</h2>
+<pre><code class="java">// (i) ifPresent(Consumer)
+oo.ifPresent((String val) -&gt; {
+    // some logic
+});
+
+// (ii) ifPresentOrElse(Consumer, Runnable): Java 9
+oo.ifPresentOrElse(
+    (String name) -&gt; System.out.println(name),        // runs if present, with the value
+    () -&gt; System.out.println("Not found")             // runs if empty
+);</code></pre>
+
+<h2>Stream integration</h2>
+<h3>Optional.stream() (Java 9)</h3>
+<p>Converts an Optional into a stream. If the value is empty, it creates an <b>empty stream</b>.</p>
+<pre><code class="java">public Stream&lt;T&gt; stream() {
+    if (isEmpty()) {
+        return Stream.empty();
+    } else {
+        return Stream.of(value);
+    }
+}
+
+Optional&lt;String&gt; nameOpt = Optional.of("Nitin");
+nameOpt.stream().forEach((String name) -&gt; System.out.println(name));</code></pre>
+<p><b>Why was stream() needed</b> (an Optional holds only 1 value)? When working with streams and invoking a method which may return <code>Optional&lt;T&gt;</code>, to plug the Optional into the stream pipeline, this is handy.</p>
+<pre><code class="java">public class UserDetails {
+    private String email;
+    public UserDetails(String email) { this.email = email; }
+    public Optional&lt;String&gt; getEmail() { return Optional.ofNullable(email); }
+}
+
+List&lt;UserDetails&gt; users = Arrays.asList(new UserDetails("a@gmail.com"), new UserDetails(null));
+
+// the lengthy way
+List&lt;String&gt; emails = users.stream()
+        .map((UserDetails user) -&gt; user.getEmail())
+        .filter((Optional&lt;String&gt; mail) -&gt; mail.isPresent())
+        .map((Optional&lt;String&gt; mail) -&gt; mail.get())
+        .collect(Collectors.toList());
+System.out.println(emails);      // [a@gmail.com]
+
+// the short way, using Optional.stream()
+List&lt;String&gt; emails = users.stream()
+        .map((UserDetails user) -&gt; user.getEmail())          // Stream&lt;Optional&lt;String&gt;&gt;
+        .flatMap((Optional&lt;String&gt; mail) -&gt; mail.stream())  // converts each Optional to Stream&lt;String&gt;
+        .collect(Collectors.toList());</code></pre>
+<p>Each <code>Optional&lt;String&gt;</code> becomes a <code>Stream&lt;String&gt;</code>, so we have <code>Stream&lt;Stream&lt;String&gt;&gt;</code>, but <code>flatMap</code> flattens it to <code>Stream&lt;String&gt;</code>; the empty ones simply vanish.</p>
+
+<h2>When NOT to use Optional</h2>
+<ol>
+<li><b>Class variable</b>: <code>class User { private Optional&lt;String&gt; name; }</code> is a bad design. Every access now requires <code>user.getName().orElse("default")</code>. It will break existing frameworks: (i) JSON serialization, (ii) Lombok, (iii) Hibernate/JPA.</li>
+<li><b>Method parameters</b>: <code>public void createUser(Optional&lt;String&gt; email)</code>. Now <code>createUser(Optional.of("Nitin"))</code> and <code>createUser(Optional.empty())</code> are fine, but <code>createUser(null)</code> &#10007;: the Optional is null itself, so we must check null for the Optional before doing <code>isPresent()</code> or <code>get()</code>. That's why we use Optional: to avoid null checks!</li>
+<li><b>Serializable class</b>: <code>class UserDTO implements Serializable { private Optional&lt;String&gt; name; }</code> (bad design). <code>Optional</code> itself is not Serializable, most serializers (Jackson) expect standard getter/setter methods, and the JSON payload may include the internal structure of Optional: instead of <code>{"name":"Nitin"}</code> we may get <code>{"name":{"present":true,"value":"Nitin"}}</code>.</li>
+<li><b>Leaking it through every layer</b>: threading <code>Optional</code> through the whole call chain (controller to DB) pollutes the code instead of isolating null handling.</li>
+</ol>
+<div class="box ex"><strong>Where to use it</strong>
+<p>Best use case: the <b>service layer</b>. It can take the decision about what to pass to the client ultimately. Regardless of what we get from the DB or anywhere else, the service layer performs business logic and decides what goes out of the application. We can control its usage for the specific business flow.</p></div>
+<p>Returning <code>Optional</code> from a repository (e.g. Spring Data's <code>Optional&lt;User&gt; findById(id)</code>) is the <b>standard, idiomatic</b> use: Optional as a <b>return type</b> is exactly what it was designed for. The advice above is about <b>not leaking it</b> through fields, parameters and DTOs. Never call <code>get()</code> without checking (prefer <code>orElseThrow()</code>), and never return <code>null</code> from a method whose return type is Optional.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>of vs ofNullable vs empty?</summary><p>of: value must be non-null (else NPE). ofNullable: wraps null as empty. empty: the shared empty instance.</p></details>
+<details><summary>orElse vs orElseGet?</summary><p>orElse evaluates its argument always; orElseGet runs the supplier only when empty.</p></details>
+<details><summary>map vs flatMap on Optional?</summary><p>Use flatMap when your function itself returns an Optional, to avoid Optional&lt;Optional&lt;T&gt;&gt;.</p></details>
+<details><summary>Why not Optional fields or parameters?</summary><p>Not serializable, awkward for frameworks, and a null Optional defeats the purpose. It is intended for return types.</p></details>
+</div>

@@ -1,0 +1,290 @@
+<h1>JPA: Native Query, Criteria API and Specification API (Parts 9 and 10)</h1>
+<p class="kicker">When JPQL is not enough: plain SQL, then dynamic type-safe queries with the Criteria API, and finally reusable Specifications.</p>
+
+<h2>Native query</h2>
+<ul>
+<li><b>Plain SQL</b> queries that interact directly with the database. If the DB changes in future, the code has to change too.</li>
+<li>No caching, lazy loading or entity life-cycle management happens for the results.</li>
+</ul>
+<p><b>When to use it over JPQL:</b></p>
+<ul>
+<li>More complex queries, including DB-specific features such as <code>JSONB</code> or <code>LATERAL JOIN</code>.</li>
+<li>When you need non-entity results, or to join tables that have no entity relationship.</li>
+<li>Query efficiency, such as bulk operations.</li>
+</ul>
+<pre><code class="java">public interface UserDetailsRepository extends JpaRepository&lt;UserDetails, Long&gt; {
+    @Query(value = "SELECT * FROM user_details WHERE user_name = :userFirstName", nativeQuery = true)
+    List&lt;UserDetails&gt; getUserDetailsByNameNativeQuery(@Param("userFirstName") String userName);
+}</code></pre>
+<p>When <b>all the fields (<code>*</code>)</b> are returned, JPA does the mapping between DB column names and entity fields itself. But when the native query returns <b>partial fields</b>, JPA does not map it to the entity, and you get an error like <code>Column "userid" not found</code> from H2. We must tell JPA how to map.</p>
+
+<h3>Way 1: @SqlResultSetMapping with @NamedNativeQuery</h3>
+<p>Declare a DTO, a result-set mapping and a named native query, then refer to the name in the repository:</p>
+<pre><code class="java">public class UserDTO {
+    private String userName;
+    private String phone;
+    public UserDTO(String userName, String phone) { this.userName = userName; this.phone = phone; }
+}
+
+@Entity
+@Table(name = "user_details")
+@SqlResultSetMapping(
+    name = "UserDTOMapping",
+    classes = @ConstructorResult(targetClass = UserDTO.class,
+        columns = { @ColumnResult(name = "user_name", type = String.class),
+                    @ColumnResult(name = "phone", type = String.class) }))
+@NamedNativeQuery(
+    name = "UserDetails.getUserDetailsByNameNativeQuery",
+    query = "SELECT user_name, phone FROM user_details WHERE user_name = :userFirstName",
+    resultSetMapping = "UserDTOMapping")
+public class UserDetails { ... }
+
+public interface UserDetailsRepository extends JpaRepository&lt;UserDetails, Long&gt; {
+    @Query(name = "UserDetails.getUserDetailsByNameNativeQuery", nativeQuery = true)
+    List&lt;UserDTO&gt; getUserDetailsByNameNativeQuery(@Param("userFirstName") String userName);
+}</code></pre>
+
+<h3>Way 2: manual mapping</h3>
+<p>Return <code>List&lt;Object[]&gt;</code> and map yourself:</p>
+<pre><code class="java">@Query(value = "SELECT user_name, phone FROM user_details WHERE user_name = :userFirstName", nativeQuery = true)
+List&lt;Object[]&gt; getUserDetailsByNameNativeQuery(@Param("userFirstName") String userName);
+
+public List&lt;UserDTO&gt; getUserDetailsByNameNativeQuery(String name) {
+    List&lt;Object[]&gt; results = userDetailsRepository.getUserDetailsByNameNativeQuery(name);
+    return results.stream()
+            .map(obj -&gt; new UserDTO((String) obj[0], (String) obj[1]))
+            .collect(Collectors.toList());
+}</code></pre>
+<p>(Spring Data interface projections, where the interface has getters named after the selected columns, are a simpler third option.)</p>
+
+<h3>Dynamic native query</h3>
+<p>Build the SQL string at runtime and run it through the EntityManager:</p>
+<pre><code class="java">String sql = "SELECT ud.user_name, ud.phone AS phone FROM user_details ud "
+           + "JOIN user_address ua ON ud.user_address_id = ua.id "
+           + "WHERE ud.user_name = ?1";
+Query query = entityManager.createNativeQuery(sql);
+query.setParameter(1, userName);
+List&lt;Object[]&gt; rows = query.getResultList();</code></pre>
+<p>Always bind values with parameters; never concatenate user input into the SQL (SQL injection).</p>
+
+<h3>Pagination and sorting in native SQL</h3>
+<ul>
+<li><b>1st way:</b> write it in the SQL itself: <code>... ORDER BY ud.phone DESC OFFSET ? ROWS FETCH FIRST ? ROWS ONLY</code> (syntax depends on the database).</li>
+<li><b>2nd way:</b> pass a <code>Pageable</code>; for native queries Spring Data appends the paging and also needs a <code>countQuery</code> if you return a <code>Page</code>. Sorting via <code>Pageable</code> in native queries is limited, so putting <code>ORDER BY</code> in the SQL is safer.</li>
+</ul>
+
+<h2>Criteria API</h2>
+<p>Native SQL supports dynamic query building but is database dependent and does not use JPA's abstraction. That is why the <b>Criteria API</b> exists: it lets you build <b>dynamic, type-safe queries</b> in Java without writing raw SQL.</p>
+
+<h3>The hierarchy</h3>
+<div class="tree2">
+<div class="top">CriteriaBuilder: used to create everything</div>
+<div class="kids">
+<div class="top">CriteriaQuery: defines the query structure
+<div class="kids">
+<div>Root (from): the entity we fetch from; <code>join</code> for related entities</div>
+<div><code>select(root)</code>: full entity; <code>multiselect(...)</code>: specific columns</div>
+<div>Predicate (where): filters, combined by <code>and()</code>, <code>or()</code>, <code>not()</code></div>
+<div>Order (orderBy), <code>groupBy()</code>, <code>having()</code></div>
+</div></div>
+<div class="top">TypedQuery: executes the query
+<div class="kids">
+<div><code>getResultList()</code>: many results; <code>getSingleResult()</code>: one result</div>
+<div><code>setFirstResult(offset)</code> and <code>setMaxResults(limit)</code>: pagination</div>
+</div></div>
+</div>
+</div>
+
+<h3>A first example</h3>
+<pre><code class="java">@GetMapping("/user/{phone}")
+public List&lt;UserDetails&gt; getUser(@PathVariable Long phone) {
+    return userDetailsService.getUserDetailsByPhoneCriteriaAPI(phone);
+}
+
+@Service
+public class UserDetailsService {
+    @PersistenceContext EntityManager entityManager;
+
+    public List&lt;UserDetails&gt; getUserDetailsByPhoneCriteriaAPI(Long phoneNo) {
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery&lt;UserDetails&gt; crQuery = cb.createQuery(UserDetails.class);
+        Root&lt;UserDetails&gt; user = crQuery.from(UserDetails.class);       // from clause
+        crQuery.select(user);
+        Predicate predicate = cb.equal(user.get("phone"), phoneNo);     // where phone = ?
+        crQuery.where(predicate);
+        TypedQuery&lt;UserDetails&gt; query = entityManager.createQuery(crQuery);
+        return query.getResultList();
+    }
+}
+
+@Table(name = "user_details")
+@Entity
+public class UserDetails {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long userId;
+    @Column(name = "user_name")
+    private String name;
+    private Long phone;
+}</code></pre>
+<p>Calling <code>/user/120</code> returns the users with phone 120, and Hibernate logs <code>... from user_details ud1_0 where ud1_0.phone=?</code>.</p>
+
+<h3>Comparison operators</h3>
+<table>
+<tr><th>Criteria</th><th>Meaning</th><th>SQL</th></tr>
+<tr><td><code>cb.equal(user.get("phone"), 123)</code></td><td>equality</td><td>where phone = 123</td></tr>
+<tr><td><code>cb.notEqual(...)</code></td><td>inequality</td><td>where phone &lt;&gt; 123</td></tr>
+<tr><td><code>cb.gt(...)</code></td><td>greater than</td><td>where phone &gt; 123</td></tr>
+<tr><td><code>cb.ge(...)</code></td><td>greater or equal</td><td>where phone &gt;= 123</td></tr>
+<tr><td><code>cb.lt(...)</code></td><td>less than</td><td>where phone &lt; 123</td></tr>
+<tr><td><code>cb.le(...)</code></td><td>less or equal</td><td>where phone &lt;= 123</td></tr>
+</table>
+
+<h3>Logical operators</h3>
+<table>
+<tr><th>Criteria</th><th>SQL</th></tr>
+<tr><td><code>cb.and(p1, p2)</code></td><td>WHERE c1 AND c2</td></tr>
+<tr><td><code>cb.or(p1, p2)</code></td><td>WHERE c1 OR c2</td></tr>
+<tr><td><code>cb.not(p1)</code></td><td>WHERE NOT c1</td></tr>
+</table>
+<pre><code class="java">Predicate predicate1 = cb.equal(user.get("phone"), phoneNo);
+Predicate predicate2 = cb.notEqual(user.get("name"), "AA");
+Predicate finalPredicate = cb.and(predicate1, predicate2);
+crQuery.where(finalPredicate);</code></pre>
+
+<h3>String and collection operations</h3>
+<table>
+<tr><th>Criteria</th><th>SQL</th></tr>
+<tr><td><code>cb.like(user.get("name"), "S%")</code></td><td>name LIKE 'S%' (starts with S)</td></tr>
+<tr><td><code>cb.notLike(user.get("name"), "S%")</code></td><td>name NOT LIKE 'S%'</td></tr>
+<tr><td><code>cb.in(user.get("phone")).value(11).value(7)</code></td><td>phone IN (11, 7)</td></tr>
+<tr><td><code>cb.not(user.get("phone").in(11, 7))</code></td><td>phone NOT IN (11, 7)</td></tr>
+</table>
+
+<h3>Select multiple fields</h3>
+<pre><code class="java">public List&lt;UserDTO&gt; getUserDetailsByPhoneCriteriaAPI(Long phoneNo) {
+    CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+    CriteriaQuery&lt;Object[]&gt; crQuery = cb.createQuery(Object[].class);
+    Root&lt;UserDetails&gt; user = crQuery.from(UserDetails.class);
+    crQuery.multiselect(user.get("name"), user.get("phone"));
+    Predicate predicate = cb.equal(user.get("phone"), phoneNo);
+    crQuery.where(predicate);
+
+    TypedQuery&lt;Object[]&gt; query = entityManager.createQuery(crQuery);
+    List&lt;Object[]&gt; results = query.getResultList();
+    List&lt;UserDTO&gt; output = new ArrayList&lt;&gt;();
+    for (Object[] row : results) {
+        String name = (String) row[0];
+        Long phone = (Long) row[1];
+        output.add(new UserDTO(name, phone));
+    }
+    return output;
+}</code></pre>
+
+<h3>Join</h3>
+<pre><code class="java">CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+CriteriaQuery&lt;Object[]&gt; crQuery = cb.createQuery(Object[].class);
+Root&lt;UserDetails&gt; user = crQuery.from(UserDetails.class);
+Join&lt;UserDetails, UserAddress&gt; address = user.join("userAddress", JoinType.INNER);
+crQuery.multiselect(user.get("name"), address.get("city"));
+Predicate predicate1 = cb.equal(user.get("phone"), phoneNo);
+crQuery.where(predicate1);
+// then createQuery, getResultList and map each row to UserDTO(name, city) as above</code></pre>
+
+<h3>Pagination and sorting</h3>
+<pre><code class="java">CriteriaQuery&lt;UserDetails&gt; crQuery = cb.createQuery(UserDetails.class);
+Root&lt;UserDetails&gt; user = crQuery.from(UserDetails.class);
+crQuery.select(user);
+Predicate predicate = cb.equal(user.get("phone"), phoneNo);
+crQuery.where(predicate);
+crQuery.orderBy(cb.desc(user.get("name")));              // sorting
+
+TypedQuery&lt;UserDetails&gt; query = entityManager.createQuery(crQuery);
+query.setFirstResult(0);                                  // offset
+query.setMaxResults(5);                                   // limit (page size)
+List&lt;UserDetails&gt; results = query.getResultList();</code></pre>
+<p>With rows A to H having the same phone, ordered by name descending and limited to 5, the response holds H, G, F, E, D.</p>
+
+<h2>Specification API</h2>
+<h3>Problem 1: code duplicity</h3>
+<p>In the Criteria API the same filter (predicate) may be needed in multiple methods and classes, so duplication is always a challenge and it is error prone. The <b>Specification</b> API solves it: you package a predicate in a reusable object.</p>
+<p>The <code>Specification</code> interface:</p>
+<table>
+<tr><th>Method</th><th>Use</th></tr>
+<tr><td><code>toPredicate()</code></td><td>The abstract method: we provide the WHERE-clause implementation</td></tr>
+<tr><td><code>spec1.and(spec2)</code></td><td>WHERE cond1 AND cond2</td></tr>
+<tr><td><code>spec1.or(spec2)</code></td><td>WHERE cond1 OR cond2</td></tr>
+<tr><td><code>Specification.not(spec1)</code></td><td>WHERE NOT cond1</td></tr>
+</table>
+<pre><code class="java">public class UserSpecification {
+
+    public static Specification&lt;UserDetails&gt; equalsPhone(Long phoneNo) {
+        return (root, query, cb) -&gt; cb.equal(root.get("phone"), phoneNo);
+    }
+
+    public static Specification&lt;UserDetails&gt; likeName(String name) {
+        return (root, query, cb) -&gt; cb.like(root.get("name"), name + "%");
+    }
+}</code></pre>
+<p>Using it in the service still needs all the criteria plumbing:</p>
+<pre><code class="java">CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+CriteriaQuery&lt;UserDetails&gt; crQuery = cb.createQuery(UserDetails.class);
+Root&lt;UserDetails&gt; userRoot = crQuery.from(UserDetails.class);
+crQuery.select(userRoot);
+Specification&lt;UserDetails&gt; specification = UserSpecification.equalsPhone(phoneNo);
+Predicate predicate = specification.toPredicate(userRoot, crQuery, cb);
+crQuery.where(predicate);
+TypedQuery&lt;UserDetails&gt; query = entityManager.createQuery(crQuery);
+List&lt;UserDetails&gt; results = query.getResultList();</code></pre>
+
+<h3>Problem 2: code boilerplate</h3>
+<p>Even though the filtering logic is out, plenty of boilerplate remains: we manage the <code>CriteriaBuilder</code>, <code>CriteriaQuery</code>, <code>Root</code> and <code>Predicate</code> objects and run the query ourselves. All we need to tell JPA is:</p>
+<ul>
+<li>from which table to fetch, including joins;</li>
+<li>which columns;</li>
+<li>the filter in the where clause.</li>
+</ul>
+<p>JPA should take care of everything else: object creation, query building and execution.</p>
+
+<h3>JpaSpecificationExecutor</h3>
+<p>Extend this interface in the repository:</p>
+<pre><code class="java">public interface UserDetailsRepository
+        extends JpaRepository&lt;UserDetails, Long&gt;, JpaSpecificationExecutor&lt;UserDetails&gt; { }</code></pre>
+<table>
+<tr><th>Method</th></tr>
+<tr><td><code>Optional&lt;T&gt; findOne(Specification&lt;T&gt; spec)</code></td></tr>
+<tr><td><code>List&lt;T&gt; findAll(Specification&lt;T&gt; spec)</code></td></tr>
+<tr><td><code>Page&lt;T&gt; findAll(Specification&lt;T&gt; spec, Pageable pageable)</code></td></tr>
+<tr><td><code>List&lt;T&gt; findAll(Specification&lt;T&gt; spec, Sort sort)</code></td></tr>
+<tr><td><code>long count(Specification&lt;T&gt; spec)</code> and <code>boolean exists(Specification&lt;T&gt; spec)</code></td></tr>
+</table>
+<p>Internally (<code>SimpleJpaRepository</code>) the framework builds the query for you: it gets the <code>CriteriaBuilder</code>, creates the <code>CriteriaQuery</code> and <code>Root</code> (<code>applySpecificationToCriteria</code>), calls <code>spec.toPredicate(root, query, builder)</code>, and if the predicate is not null applies <code>query.where(predicate)</code>, then runs it and applies the paging.</p>
+<pre><code class="java">public List&lt;UserDetails&gt; getUserDetailsByPhoneSpec(Long phoneNo) {
+    Specification&lt;UserDetails&gt; result = Specification
+            .where(UserSpecification.equalsPhone(phoneNo))
+            .and(UserSpecification.likeName("AA"));
+    return userDetailsRepository.findAll(result);
+}
+
+// a join specification
+public static Specification&lt;UserDetails&gt; joinAddress() {
+    return (root, query, cb) -&gt; {
+        Join&lt;UserDetails, UserAddress&gt; address = root.join("userAddress", JoinType.INNER);
+        return cb.isNotNull(address.get("id"));    // any predicate on the join, or null to just join
+    };
+}</code></pre>
+<p>Compared to the raw Criteria API version (create builder, query, root, join, two predicates, <code>cb.and</code>, typed query, <code>getResultList</code>), the Specification API is <b>much cleaner and the pieces are reusable</b>: each specification can be combined with <code>and / or / not</code> in any method.</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><b>Choosing:</b> derived query for 1 or 2 simple conditions; <code>@Query</code> JPQL for fixed complex queries; <b>Specification</b> (or Criteria) when filters are <b>optional and dynamic</b> (a search screen where any combination of fields may be given); native only when SQL features demand it.</li>
+<li>Build dynamic filters by chaining only the specs whose inputs are present: <code>spec = spec.and(nameLike(...))</code> only if the name was supplied.</li>
+<li>Typo-safe field names: use the JPA static metamodel (<code>UserDetails_.phone</code>, generated by <code>hibernate-jpamodelgen</code>) instead of the strings <code>"phone"</code>.</li>
+<li>A different, popular option for dynamic queries is Querydsl.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>When would you use a native query?</summary><p>DB-specific features, non-entity results or joins without relations, performance-tuned bulk operations. Cost: portability, no entity management.</p></details>
+<details><summary>Why Criteria API over string-concatenated JPQL?</summary><p>It builds dynamic queries safely, with compile-time checked structure and no injection from string building.</p></details>
+<details><summary>What problems do Specifications solve over Criteria?</summary><p>Duplicate predicates (they become reusable, composable objects) and boilerplate (the repository builds the CriteriaBuilder/Root/query for you).</p></details>
+<details><summary>How do you make a repository support Specifications?</summary><p>Extend <code>JpaSpecificationExecutor&lt;T&gt;</code> alongside <code>JpaRepository</code>.</p></details>
+</div>

@@ -1,0 +1,67 @@
+<h1>@Transactional: Isolation Levels</h1>
+<p class="kicker">How much of one transaction's work another running transaction may see: dirty, non-repeatable and phantom reads.</p>
+
+<h2>What is an isolation level?</h2>
+<p>It tells <b>how the changes made by one transaction are visible to other transactions running in parallel</b>.</p>
+<pre><code class="java">@Transactional(propagation = Propagation.REQUIRED, isolation = Isolation.READ_COMMITTED)
+public void updateUser() { ... }</code></pre>
+<table>
+<tr><th>Isolation level</th><th>Dirty read</th><th>Non-repeatable read</th><th>Phantom read</th><th>Concurrency</th></tr>
+<tr><td><code>READ_UNCOMMITTED</code></td><td>Possible</td><td>Possible</td><td>Possible</td><td>Highest</td></tr>
+<tr><td><code>READ_COMMITTED</code></td><td>No</td><td>Possible</td><td>Possible</td><td>High</td></tr>
+<tr><td><code>REPEATABLE_READ</code></td><td>No</td><td>No</td><td>Possible</td><td>Lower</td></tr>
+<tr><td><code>SERIALIZABLE</code></td><td>No</td><td>No</td><td>No</td><td>Lowest</td></tr>
+</table>
+<p>The <b>default isolation level depends on the database</b>: most relational databases (PostgreSQL, Oracle, SQL Server) default to <code>READ_COMMITTED</code>, while MySQL's InnoDB defaults to <code>REPEATABLE_READ</code>. With <code>Isolation.DEFAULT</code>, Spring just uses the database's own default.</p>
+
+<h2>The three problems</h2>
+<h3>1. Dirty read</h3>
+<p>Transaction A reads <b>uncommitted</b> data of another transaction. If that other transaction is then <b>rolled back</b>, what A read never really existed: a dirty read.</p>
+<table>
+<tr><th>Time</th><th>Transaction A</th><th>Transaction B</th><th>DB</th></tr>
+<tr><td>T1</td><td>BEGIN</td><td>BEGIN</td><td>id 123: Free</td></tr>
+<tr><td>T2</td><td></td><td>Update row 123 to Booked (not committed)</td><td>id 123: Free (committed)</td></tr>
+<tr><td>T3</td><td>Read row 123: <b>Booked</b></td><td></td><td></td></tr>
+<tr><td>T4</td><td></td><td>Rollback</td><td>id 123: Free</td></tr>
+</table>
+<h3>2. Non-repeatable read</h3>
+<p>Transaction A reads the <b>same row several times</b> and may get a <b>different value</b> because another transaction updated and committed it in between.</p>
+<table>
+<tr><th>Time</th><th>Transaction A</th><th>Other</th></tr>
+<tr><td>T1</td><td>BEGIN</td><td></td></tr>
+<tr><td>T2</td><td>Read row 1: Free</td><td></td></tr>
+<tr><td>T3</td><td></td><td>Another transaction changes row 1 to Booked and commits</td></tr>
+<tr><td>T4</td><td>Read row 1: <b>Booked</b></td><td></td></tr>
+</table>
+<h3>3. Phantom read</h3>
+<p>Transaction A runs the <b>same query several times</b>, but the <b>set of rows returned differs</b> because another transaction inserted (or deleted) rows and committed.</p>
+<table>
+<tr><th>Time</th><th>Transaction A</th><th>Other</th></tr>
+<tr><td>T2</td><td><code>read where id &gt; 0 and id &lt; 5</code>: 2 rows (id 1, 3)</td><td></td></tr>
+<tr><td>T3</td><td></td><td>Inserts row id 2 and commits</td></tr>
+<tr><td>T4</td><td>same query: <b>3 rows</b> (id 1, 2, 3)</td><td></td></tr>
+</table>
+<div class="box extra"><strong>Easy way to remember</strong>
+<p>Dirty read: a row's <i>uncommitted</i> value. Non-repeatable: the <i>same row's</i> value changes. Phantom: the <i>number of rows</i> changes.</p></div>
+
+<h2>How databases enforce it: locking</h2>
+<p>Locks make sure no other transaction updates the locked rows.</p>
+<table>
+<tr><th>Held lock</th><th>Another shared lock</th><th>Another exclusive lock</th></tr>
+<tr><td><b>Shared lock (S)</b>, also called a <b>read lock</b></td><td>Yes</td><td>No</td></tr>
+<tr><td><b>Exclusive lock (X)</b>, also called a <b>write lock</b></td><td>No</td><td>No</td></tr>
+</table>
+<table>
+<tr><th>Isolation level</th><th>Locking strategy</th></tr>
+<tr><td><b>Read Uncommitted</b></td><td>Read: no lock. Write: no lock.</td></tr>
+<tr><td><b>Read Committed</b></td><td>Read: shared lock, released as soon as the read is done. Write: exclusive lock, kept to the end of the transaction.</td></tr>
+<tr><td><b>Repeatable Read</b></td><td>Read: shared lock, released only at the end of the transaction. Write: exclusive lock, released at the end of the transaction.</td></tr>
+<tr><td><b>Serializable</b></td><td>Same as Repeatable Read, plus a <b>range lock</b>, all released at the end of the transaction.</td></tr>
+</table>
+<p>This is the classic lock-based picture. Modern databases like PostgreSQL, Oracle and InnoDB mostly use <b>MVCC</b> (readers see a snapshot, so reads don't block writes) instead of read locks, but the guarantees per level stay as in the table above.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Which isolation level would you use for a booking or payment flow?</summary><p>Usually READ_COMMITTED with explicit protection of the critical row (pessimistic lock <code>SELECT ... FOR UPDATE</code> or an optimistic <code>@Version</code> check). SERIALIZABLE is correct but kills throughput.</p></details>
+<details><summary>Explain dirty, non-repeatable and phantom reads.</summary><p>Uncommitted data read; same row read twice gives two values; same query returns a different set of rows.</p></details>
+<details><summary>What is the trade-off as isolation goes up?</summary><p>More consistency, but more locking or retries and lower concurrency.</p></details>
+</div>

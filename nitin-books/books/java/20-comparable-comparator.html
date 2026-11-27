@@ -1,0 +1,122 @@
+<h1>Comparable vs Comparator</h1>
+<p class="kicker">How Java knows which object comes first when you sort.</p>
+
+<p>Both provide a <b>way</b> to sort a collection of objects. They <b>don't sort</b> themselves, they just <b>help</b>: they tell the sorting algorithm how to compare two objects.</p>
+
+<h2>The problem: sorting objects</h2>
+<pre><code class="java">public class Car {
+    String carName;
+    String carType;
+    Car(String name, String carType) {
+        this.carName = name;
+        this.carType = carType;
+    }
+}
+
+Car[] carArray = new Car[3];
+carArray[0] = new Car("SUV", "petrol");
+carArray[1] = new Car("Sedan", "diesel");
+carArray[2] = new Car("HatchBack", "CNG");
+Arrays.sort(carArray);</code></pre>
+<p>This throws: <b><code>java.lang.ClassCastException: Car cannot be cast to java.lang.Comparable</code></b>. It's not something as clear as an <code>Integer</code> array, where Java knows the order, so it throws the above exception.</p>
+<p>There are two ways to teach Java how to sort the object array.</p>
+
+<h2>1. Comparator (a functional interface)</h2>
+<p>Abstract method: <code>int compare(T obj1, T obj2)</code>. The sorting algorithm uses this <code>compare</code> method to compare two variables and decide whether to <b>swap</b> them or not.</p>
+<table>
+<tr><th>Returns</th><th>Meaning</th></tr>
+<tr><td><b>positive</b> (e.g. 1)</td><td>v1 is bigger than v2</td></tr>
+<tr><td><b>0</b></td><td>v1 and v2 are equal</td></tr>
+<tr><td><b>negative</b> (e.g. -1)</td><td>v1 is smaller than v2</td></tr>
+</table>
+<p>(Here v1 and v2 are obj1 and obj2.) Mostly in the algorithm, if the method returns a positive value, it <b>swaps</b> the values, so the smaller comes first in ascending order.</p>
+
+<h3>Walkthrough</h3>
+<pre><code class="java">Integer a[] = {6, 4, 1, 9, 2, 11};
+Arrays.sort(a, (Integer val1, Integer val2) -&gt; val1 - val2);
+//             ^ compare method being overridden: providing its implementation
+//               a lambda way to initialize the Comparator functional interface</code></pre>
+<div class="diag"><div class="row"><div class="cb">v1 = 6, v2 = 9<br><small>6 - 9 = -3 &lt; 0<br><b>no swap</b></small></div><div class="cb">v1 = 9, v2 = 6<br><small>9 - 6 = 3 &gt; 0<br><b>swap</b>: 6 comes before 9</small></div></div></div>
+<p>So it just provides a way to <b>compare two values</b>, and the sort performs the swap based on that. Internally <code>Arrays.sort</code> may use any algorithm; we don't care. It does not sort itself, it just compares.</p>
+<p>If I do <code>val2 - val1</code>, it will be <b>descending</b> order: <code>v1 = 6, v2 = 9</code>, i.e. 9 - 6 &gt; 0, so swap.</p>
+<p>Subtracting to compare is only a teaching shortcut: <code>Integer.MAX_VALUE - (-1)</code> overflows and flips the sign. In real code prefer <code>Integer.compare(val1, val2)</code> or, for descending, <code>Integer.compare(val2, val1)</code>.</p>
+
+<h3>For the Car array</h3>
+<pre><code class="java">Arrays.sort(carArray, (Car obj1, Car obj2) -&gt;
+        obj2.carType.compareTo(obj1.carType));      // comparator (descending by type)</code></pre>
+<p>Instead of a lambda, we could write a class:</p>
+<pre><code class="java">public class CarNameComparator implements Comparator&lt;Car&gt; {   // functional interface, generic
+    @Override
+    public int compare(Car o1, Car o2) {
+        return o2.carName.compareTo(o1.carName);
+    }
+}
+
+Arrays.sort(carArray, new CarNameComparator());
+// for a list, use:
+Collections.sort(cars, new CarNameComparator());</code></pre>
+<p>Or the class could implement the comparator itself:</p>
+<pre><code class="java">public class Car implements Comparator&lt;Car&gt; {
+    String carName, carType;
+    @Override
+    public int compare(Car o1, Car o2) {
+        return o1.carName.compareTo(o2.carName);
+    }
+}
+Collections.sort(cars, new Car());       // inside it the compare method will be used</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p>That last style works, but it's an odd design (a car that compares other cars). A separate comparator class, or a lambda, is cleaner. Modern style: <code>cars.sort(Comparator.comparing(c -&gt; c.carName))</code>, and chain with <code>.thenComparing(...)</code> or flip it with <code>.reversed()</code>.</p></div>
+
+<h2>2. Comparable</h2>
+<p>Abstract method: <code>int compareTo(T obj2)</code>. It's an interface, they have not defined it as a functional interface, but it has one abstract method <code>compareTo</code>. (We saw that it's not necessary to add <code>@FunctionalInterface</code>, but if added, it can't have more than one abstract method.)</p>
+<p>Here only <b>one parameter</b> is accepted (the other object is <code>this</code>). In Comparator we could use a lambda expression or a new class like <code>CarNameComparator</code>. But here, since only one parameter is accepted, we have only one option left, i.e. <code>public class Car implements Comparable&lt;Car&gt;</code> and compare using <code>this.compareTo</code>.</p>
+<pre><code class="java">Arrays.sort(new Integer[]{4, 2, 7, 6});      // internally it uses compareTo</code></pre>
+<p>In Java it's defined like this, inside the <code>Integer</code> class:</p>
+<pre><code class="java">public int compareTo(Integer anotherInteger) {
+    return compare(this.value, anotherInteger.value);
+}
+
+public static int compare(int x, int y) {
+    return (x &lt; y) ? -1 : ((x == y) ? 0 : 1);     // as we can see, it's ascending
+}</code></pre>
+<p>In Java, internally <code>Integer extends Number implements Comparable&lt;Integer&gt;</code>. So for <code>Integer</code> we <b>can't</b> perform a descending sort using Comparable, because the <code>compareTo</code> method is already defined; for descending we'll have to use a <b>Comparator</b>.</p>
+
+<h3>For a custom class</h3>
+<pre><code class="java">public class Car implements Comparable&lt;Car&gt; {
+    String carName;
+    String carType;
+    Car(String name, String type) {
+        this.carName = name;
+        this.carType = type;
+    }
+
+    @Override
+    public int compareTo(Car o2) {
+        return this.carType.compareTo(o2.carType);
+    }
+}
+
+List&lt;Car&gt; carList = new ArrayList&lt;&gt;();
+Collections.sort(carList);     // compareTo is used to compare, and we have implemented compareTo</code></pre>
+<p>We have to change it in the object's class itself. If we need descending at one place and ascending at another, it won't be possible, so we use a <b>Comparator</b>.</p>
+
+<h2>Side by side</h2>
+<table>
+<tr><th>Comparable</th><th>Comparator</th></tr>
+<tr><td><code>java.lang</code> package</td><td><code>java.util</code> package</td></tr>
+<tr><td><code>int compareTo(T o)</code></td><td><code>int compare(T o1, T o2)</code></td></tr>
+<tr><td>Implemented by the class whose objects are being sorted (<b>modifies the class</b>)</td><td>Can be a separate class or a lambda expression (<b>no class modification</b> needed)</td></tr>
+<tr><td>Provides a <b>single, natural</b> sorting order (e.g. sorting Strings alphabetically)</td><td>Provides <b>multiple and custom</b> sorting orders (e.g. sorting by name, then age)</td></tr>
+<tr><td>Used by <code>Collections.sort(list)</code></td><td>Used by <code>Collections.sort(list, comparator)</code> or <code>Arrays.sort(array, comparator)</code></td></tr>
+<tr><td>Less flexible, as the sort order is fixed once defined</td><td>Highly flexible: dynamic sorting behaviour and chaining of comparators</td></tr>
+</table>
+<div class="diag">
+<div class="row"><div class="cb wide"><b>Case 1: Comparable</b> &mdash; "I can compare myself"<br><small><code>Arrays.sort(cars)</code> internally calls <code>a.compareTo(b)</code><br>sorting logic is inside the class; only one natural order possible</small></div></div>
+<div class="row"><div class="cb wide"><b>Case 2: Comparator</b> &mdash; "I compare others"<br><small><code>Arrays.sort(cars, comparator)</code> internally calls <code>comparator.compare(a, b)</code><br>sorting logic is external; you can have many comparators</small></div></div></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>When would you use Comparator over Comparable?</summary><p>When you can't edit the class, or you need more than one order (by name, by price, by date), or a different order at different places.</p></details>
+<details><summary>What happens if you sort objects that aren't Comparable and give no Comparator?</summary><p><code>ClassCastException</code>: "cannot be cast to java.lang.Comparable".</p></details>
+<details><summary>How do you sort by two fields?</summary><p><code>Comparator.comparing(Person::getName).thenComparing(Person::getAge)</code>.</p></details>
+<details><summary>Is Comparator a functional interface?</summary><p>Yes, it has one abstract method, <code>compare</code>. <code>equals()</code> in it doesn't count because it comes from <code>Object</code>.</p></details>
+</div>

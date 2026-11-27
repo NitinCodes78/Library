@@ -1,0 +1,129 @@
+<h1>JPA: One-to-Many Unidirectional (Part 7)</h1>
+<p class="kicker">One parent with many children: the join table vs @JoinColumn, lazy/eager fetch, cascade types and orphanRemoval.</p>
+
+<h2>What it is</h2>
+<ul>
+<li>One entity is associated with <b>multiple records</b> of another entity, for example a <b>User can have many Orders</b>.</li>
+<li>Unidirectional: the reference exists in <b>one direction only</b>, from parent to child.</li>
+<li>Since it is 1:many, one parent row cannot store many child ids, so by default JPA creates a <b>new (join) table</b> to store the mapping.</li>
+<li>By default it is <b>lazy</b>: when we query the parent, the child rows are not fetched.</li>
+</ul>
+<pre><code class="java">@Table(name = "user_details")
+@Entity
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long userId;
+    private String name;
+    private String phone;
+
+    @OneToMany(cascade = CascadeType.ALL)
+    private List&lt;OrderDetails&gt; orders = new ArrayList&lt;&gt;();
+
+    public UserDetails() { }
+}
+
+@Table(name = "order_details")
+@Entity
+public class OrderDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String productName;
+}</code></pre>
+<p>Three tables are created: <code>USER_DETAILS</code>, <code>ORDER_DETAILS</code> and a new join table <code>USER_DETAILS_ORDER_DETAILS</code> with columns <code>ORDER_DETAILS_ID</code> and <code>USER_DETAILS_ID</code>.</p>
+
+<h2>What if we do not want the extra table?</h2>
+<p>Use <code>@JoinColumn</code>. This tells JPA to store the <b>foreign key in the child table</b> instead of creating a new table.</p>
+<pre><code class="java">@OneToMany(cascade = CascadeType.ALL)
+@JoinColumn(name = "user_id_fk", referencedColumnName = "userId")
+private List&lt;OrderDetails&gt; orders = new ArrayList&lt;&gt;();</code></pre>
+<p>Now <code>ORDER_DETAILS</code> has <code>ID, USER_ID_FK, PRODUCT_NAME</code> and there is no join table.</p>
+
+<h3>1. Insert call</h3>
+<pre><code>POST /api/user
+{ "name": "JohnXYZ", "phone": "1234567890",
+  "orders": [ {"productName": "IceCream"}, {"productName": "ColdDrinks"} ] }</code></pre>
+<p>One row goes in <code>USER_DETAILS</code> and two in <code>ORDER_DETAILS</code>, each with <code>USER_ID_FK = 1</code> (cascade does the child inserts).</p>
+
+<h3>2. Get call (LAZY)</h3>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+    @Autowired UserDetailsService userDetailsService;
+
+    @PostMapping(path = "/user")
+    public UserDetails saveUser(@RequestBody UserDetails userDetails) {
+        return userDetailsService.saveUser(userDetails);
+    }
+
+    @GetMapping("/user/{id}")
+    public UserDetailsDTO getUser(@PathVariable Long id) {
+        UserDetails output = userDetailsService.findByID(id);
+        System.out.println("going to map UserDetails to UserDTO");
+        UserDetailsDTO userDTO = output.mapUserDetailsToUserDTO();
+        return userDTO;
+    }
+}
+
+public class UserDetailsDTO {
+    private Long id;
+    private String name;
+    private String phone;
+    private List&lt;OrderDetails&gt; orders;
+
+    public UserDetailsDTO(UserDetails userDetails) {
+        this.id = userDetails.getUserId();
+        this.name = userDetails.getName();
+        this.phone = userDetails.getPhone();
+        System.out.println("going to query order table here now");
+        this.orders = userDetails.getOrderDetails();      // lazy collection touched here
+    }
+}</code></pre>
+<p>Output order in the console: first <code>select ... from user_details where user_id=?</code>, then "going to map UserDetails to UserDTO", then "going to query order table here now", and <b>only then</b> <code>select ... from order_details where user_id_fk=?</code>. The child query fires exactly when the collection is first accessed.</p>
+
+<h3>EAGER fetch</h3>
+<pre><code class="java">@OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+@JoinColumn(name = "user_id_fk", referencedColumnName = "userId")
+private List&lt;OrderDetails&gt; orders = new ArrayList&lt;&gt;();</code></pre>
+<p>Now the very first query is a single <b>left join</b> between <code>user_details</code> and <code>order_details</code> on <code>user_id = user_id_fk</code>: the parent and children load together.</p>
+
+<h2>Cascade types</h2>
+<table>
+<tr><th>CascadeType</th><th>Effect</th></tr>
+<tr><td><code>PERSIST</code></td><td>Saving User (parent) also saves the related Orders (children).</td></tr>
+<tr><td><code>MERGE</code></td><td>Updating User also updates Orders.</td></tr>
+<tr><td><code>REMOVE</code></td><td>Deleting User also deletes Orders.</td></tr>
+<tr><td><code>ALL</code></td><td>Includes all cascade operations.</td></tr>
+</table>
+
+<h2>Orphan removal</h2>
+<p>Automatically <b>removes a child entry when it is removed from the parent's collection</b>.</p>
+<pre><code class="java">@OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+@JoinColumn(name = "user_id_fk", referencedColumnName = "userId")
+private List&lt;OrderDetails&gt; orders = new ArrayList&lt;&gt;();</code></pre>
+<p>Test: insert a user with two orders (IceCream and ColdDrinks), then call an API that does:</p>
+<pre><code class="java">@Transactional
+public UserDetails removeFirstOrder(Long id) {
+    UserDetails output = userDetailsService.findByID(id);
+    output.getOrderDetails().remove(0);     // take IceCream out of the list
+    return output;
+}</code></pre>
+<ul>
+<li><b>Without orphanRemoval</b> (<code>false</code>): Hibernate only fires <code>update order_details set user_id_fk=null where user_id_fk=? and id=?</code>. The IceCream row <b>stays</b> in the table with a null FK: an orphan record.</li>
+<li><b>With orphanRemoval = true</b>: the row is actually <b>deleted</b> from <code>ORDER_DETAILS</code>.</li>
+</ul>
+<p>The persistence context knows all this information because the data is held in memory, so removing an element from the collection is detected at flush time (this is why the method must be transactional).</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><code>CascadeType.REMOVE</code> deletes children when the <b>parent</b> is deleted; <code>orphanRemoval</code> deletes a child when it is <b>removed from the collection</b>. Different triggers, so they are often used together.</li>
+<li>With the join-table default, every insert touches an extra table; <code>@JoinColumn</code> gives a leaner schema, though a unidirectional one-to-many with a join column issues an extra UPDATE to set the FK after the child insert. A bidirectional mapping (next chapter) avoids that.</li>
+<li>Accessing a lazy collection outside a transaction/session throws <code>LazyInitializationException</code>; the DTO conversion should happen inside the service/transaction, or use a fetch join.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why does @OneToMany create a third table?</summary><p>One parent row cannot hold many child ids, so JPA creates a join table. Add <code>@JoinColumn</code> to keep the FK in the child table.</p></details>
+<details><summary>Cascade REMOVE vs orphanRemoval?</summary><p>REMOVE: deleting the parent deletes children. orphanRemoval: removing a child from the parent's collection deletes it.</p></details>
+<details><summary>What is the N+1 problem?</summary><p>One query loads N parents and then lazy loading fires one extra query per parent for its children. Fix with fetch join, <code>@EntityGraph</code> or batch fetching.</p></details>
+</div>

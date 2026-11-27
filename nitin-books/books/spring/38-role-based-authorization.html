@@ -1,0 +1,236 @@
+<h1>Spring Boot Security: Role Based Authorization (Annotations)</h1>
+<p class="kicker">@PreAuthorize and @PostAuthorize with roles, permissions and SpEL, instead of one long list of URL rules.</p>
+
+<h2>Why annotations?</h2>
+<p>We have covered the different types of authentication, and also how authorization can be done at the Security Filter layer itself:</p>
+<pre><code class="java">http.authorizeHttpRequests(auth -&gt; auth
+        .requestMatchers("/users").hasRole("USER")
+        .anyRequest().authenticated())
+    .formLogin(Customizer.withDefaults());</code></pre>
+<p>But in a large-scale application with <b>hundreds of APIs</b>, managing the roles in the security filter becomes difficult and does not scale. That is where <b>annotation-based role authorization</b> comes in: the rule sits right on the controller (or service) method.</p>
+<p>Recall the authentication flow (Basic as the example): <code>BasicAuthenticationFilter</code> decodes the header, creates an Authentication object (not authenticated yet), the <code>AuthenticationManager</code> and provider fetch the user via <code>UserDetailsService</code> and compare passwords, and on success the object's <b>authenticated status is changed</b> and it is stored in the <code>SecurityContextHolder</code>. It now carries the username and the <b>authorities</b> (roles and permissions). The annotations read these authorities.</p>
+
+<h2>The two annotations</h2>
+<table>
+<tr><th>Annotation</th><th>When</th></tr>
+<tr><td><code>@PreAuthorize</code></td><td>Does authorization <b>before</b> the execution of the API/method.</td></tr>
+<tr><td><code>@PostAuthorize</code></td><td>Does authorization <b>after</b> the execution of the API/method, but <b>before</b> the response is sent back to the user.</td></tr>
+</table>
+
+<h2>Create users first (dynamically)</h2>
+<p>As in the user-creation chapter, but now a user has <b>one role</b> (ROLE_ADMIN, ROLE_USER ...) and <b>many permissions</b> (ORDER_READ, SALES_DELETE ...), which are more granular.</p>
+<pre><code class="java">@Entity
+@Table(name = "user_login")
+public class UserLoginEntity implements UserDetails {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @Column(unique = true, nullable = false)
+    private String username;
+    @Column(nullable = false)
+    private String password;
+    private String role;
+
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    private List&lt;UserPermissionEntity&gt; permissions = new ArrayList&lt;&gt;();
+
+    @Override
+    public Collection&lt;? extends GrantedAuthority&gt; getAuthorities() {
+        Set&lt;GrantedAuthority&gt; authorities = new HashSet&lt;&gt;();
+        authorities.add(new SimpleGrantedAuthority(role));                       // the role, e.g. ROLE_USER
+        permissions.forEach(permission -&gt;
+            authorities.add(new SimpleGrantedAuthority(permission.getName())));  // each permission, e.g. ORDER_READ
+        return authorities;
+    }
+    @Override public String getPassword() { return password; }
+    @Override public String getUsername() { return username; }
+    // getters and setters
+}
+
+@Entity
+@Table(name = "user_permission")
+public class UserPermissionEntity {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    // getters and setters
+}
+
+@Service
+public class UserLoginEntityService implements UserDetailsService {
+    @Autowired private UserLoginEntityRepository userLoginEntityRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        return userLoginEntityRepository.findByUsername(username)
+                .orElseThrow(() -&gt; new UsernameNotFoundException("user not found"));
+    }
+    public UserDetails save(UserLoginEntity userLoginEntity) { return userLoginEntityRepository.save(userLoginEntity); }
+}
+
+@Repository
+public interface UserLoginEntityRepository extends JpaRepository&lt;UserLoginEntity, Long&gt; {
+    Optional&lt;UserLoginEntity&gt; findByUsername(String username);
+}
+
+@RestController
+public class UserController {
+    @Autowired UserLoginEntityService userLoginEntityService;
+    @Autowired PasswordEncoder passwordEncoder;
+
+    @PostMapping("/user-login")
+    public ResponseEntity&lt;String&gt; register(@RequestBody UserLoginEntity userLoginEntity) {
+        userLoginEntity.setPassword(passwordEncoder.encode(userLoginEntity.getPassword()));
+        userLoginEntityService.save(userLoginEntity);
+        return ResponseEntity.ok("User registered successfully!");
+    }
+}</code></pre>
+<pre><code>POST /user-login
+{ "username": "sj", "password": "123", "role": "ROLE_USER",
+  "permissions": [ { "name": "ORDER_READ" } ] }</code></pre>
+<p>A Spring "authority" is just a string; both the role and the permissions become <code>GrantedAuthority</code> entries.</p>
+
+<h2>Security config</h2>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity(prePostEnabled = true)       // without this, @PreAuthorize / @PostAuthorize are ignored
+public class SecurityConfig {
+
+    @Bean
+    public PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/user-login").permitAll()
+                .anyRequest().authenticated())
+            .sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .csrf(csrf -&gt; csrf.disable())
+            .httpBasic(Customizer.withDefaults());
+        return http.build();
+    }
+}</code></pre>
+<p>(<code>@EnableMethodSecurity</code> is the current annotation; <code>prePostEnabled</code> is true by default in it. The older <code>@EnableGlobalMethodSecurity</code> is deprecated.)</p>
+
+<h2>Test controllers</h2>
+<pre><code class="java">@RestController
+@RequestMapping("/api")
+public class OrderController {
+    @GetMapping("/orders")
+    @PreAuthorize("hasRole('USER') and hasAuthority('ORDER_READ')")
+    public ResponseEntity&lt;String&gt; getOrders() {
+        return ResponseEntity.ok("ALL orders has been fetched successfully");
+    }
+}
+
+@RestController
+@RequestMapping("/api")
+public class SalesController {
+    @GetMapping("/sales")
+    @PreAuthorize("hasAuthority('SALES_READ')")
+    public ResponseEntity&lt;String&gt; getSales() {
+        return ResponseEntity.ok("ALL Sales details has been fetched successfully");
+    }
+}</code></pre>
+<ul>
+<li>We created a user who has both <code>ROLE_USER</code> and <code>ORDER_READ</code>, so <code>/api/orders</code> (Basic auth in Postman) returns <b>"ALL orders has been fetched successfully"</b>.</li>
+<li>Calling <code>/api/sales</code>, for which the user has no <code>SALES_READ</code> permission, throws an exception: <b>403 Forbidden</b>.</li>
+</ul>
+
+<h2>hasRole vs hasAuthority</h2>
+<p>Spring treats both in a similar way. The only difference: for <code>hasRole</code> the prefix <code>"ROLE_"</code> is appended. <code>SecurityExpressionRoot</code> shows this:</p>
+<pre><code class="java">private String defaultRolePrefix = "ROLE_";
+
+public final boolean hasAuthority(String authority) { return hasAnyAuthority(authority); }
+public final boolean hasAnyAuthority(String... authorities) { return hasAnyAuthorityName(null, authorities); }
+
+public final boolean hasRole(String role) { return hasAnyRole(role); }
+public final boolean hasAnyRole(String... roles) { return hasAnyAuthorityName(this.defaultRolePrefix, roles); }
+
+private boolean hasAnyAuthorityName(String prefix, String... roles) {
+    Set&lt;String&gt; roleSet = getAuthoritySet();
+    for (String role : roles) {
+        String defaultedRole = getRoleWithDefaultPrefix(prefix, role);
+        if (roleSet.contains(defaultedRole)) return true;       // found a matching authority
+    }
+    return false;
+}</code></pre>
+<p>So <code>hasRole('USER')</code> checks for the authority <code>ROLE_USER</code>, while <code>hasAuthority('ORDER_READ')</code> checks for exactly <code>ORDER_READ</code>.</p>
+
+<h2>How does it run before the controller method?</h2>
+<p>It is because of <b>interceptors</b>, but method-level ones (AOP proxies around the bean): <code>@PreAuthorize</code> is intercepted by <b><code>AuthorizationManagerBeforeMethodInterceptor</code></b>. (What interceptors are, how they work and how they differ from filters we have already covered in depth.) The flow: the request passes the security filters (authentication), reaches the DispatcherServlet and the controller proxy, where the method interceptor checks the annotation first.</p>
+<div class="flow"><b>Request</b><i>security filters: authenticate</i><b>DispatcherServlet</b><i>proxy</i><b>AuthorizationManagerBeforeMethodInterceptor</b><i>allowed</i><b>Controller method</b></div>
+
+<h2>The expression is SpEL</h2>
+<p><code>@PreAuthorize("hasRole('USER') and hasAuthority('ORDER_READ')")</code> uses <b>SpEL (Spring Expression Language)</b>. The framework's <code>SpelExpressionParser</code> compiles these strings. High-level flow:</p>
+<ol>
+<li>Read the string from the <code>@PreAuthorize</code> annotation.</li>
+<li>Parse it with <code>SpelExpressionParser</code>, converting the string into an <b>AST (Abstract Syntax Tree)</b>; <code>and</code> becomes an <code>OpAnd</code> node, whose evaluation returns false at once if the left operand is false, otherwise it evaluates the right operand.</li>
+<li><code>AuthorizationManagerBeforeMethodInterceptor</code> <b>resolves the references</b> found in the expression (<code>hasRole</code>, <code>hasAuthority</code>, <code>authentication</code> ...).</li>
+<li>It validates the result and decides <b>whether to invoke the method</b> or not (access denied, 403).</li>
+</ol>
+
+<h3>More operators</h3>
+<table>
+<tr><th>Logical operator</th><th>Meaning</th><th>Example</th></tr>
+<tr><td><code>and</code></td><td>Logical AND</td><td><code>hasRole('ADMIN') and hasAuthority('READ')</code></td></tr>
+<tr><td><code>or</code></td><td>Logical OR</td><td><code>hasRole('ADMIN') or hasRole('USER')</code></td></tr>
+<tr><td><code>not</code></td><td>Logical NOT</td><td><code>not hasRole('ADMIN')</code></td></tr>
+<tr><td><code>!</code></td><td>Also logical NOT</td><td><code>!hasAuthority('DELETE')</code></td></tr>
+</table>
+<table>
+<tr><th>Relational operator</th><th>Meaning</th></tr>
+<tr><td><code>==</code> / <code>!=</code></td><td>equal / not equal: <code>#value == 15</code>, <code>#value != 15</code></td></tr>
+<tr><td><code>&lt;</code>, <code>&gt;</code></td><td>less than / greater than: <code>#value &lt; 100</code></td></tr>
+<tr><td><code>&lt;=</code>, <code>&gt;=</code></td><td>less or equal / greater or equal: <code>#value &gt;= 90</code></td></tr>
+</table>
+<p>Method parameters can be referenced with <code>#</code>, and the current user with <code>authentication.principal</code>, so a user can be allowed to read only <b>their own</b> data:</p>
+<pre><code class="java">@PreAuthorize("#id == authentication.principal.id")
+@GetMapping("/users/{id}")
+public User fetchUserDetails(@PathVariable Long id) {
+    return userServiceObject.fetchUserDetails(id);
+}</code></pre>
+<p>(This needs the principal to expose <code>getId()</code>, which our <code>UserLoginEntity</code> does.)</p>
+
+<h2>@PostAuthorize</h2>
+<ul>
+<li>Authorization happens <b>after</b> the method executes but before the response goes back to the user.</li>
+<li>It is intercepted by <b><code>AuthorizationManagerAfterMethodInterceptor</code></b>.</li>
+<li>Typical use: the decision depends on <b>what the method returned</b> (use <code>returnObject</code> in the expression), for example only the owner of an order may see it.</li>
+</ul>
+<p><b>Example.</b> Two users were created (<code>a_user</code> and <code>b_user</code>, both <code>ROLE_USER</code>, with ORDER_READ). For testing, the API hard-codes the user id in the returned order to the id of <code>a_user</code>:</p>
+<pre><code class="java">@RestController
+@RequestMapping("/api")
+public class OrderController {
+
+    @GetMapping("/orders")
+    @PreAuthorize("hasRole('USER') and hasAuthority('ORDER_READ')")
+    @PostAuthorize("returnObject.userID == authentication.principal.id")
+    public OrderDTO getOrders() {
+        OrderDTO orderDTO = new OrderDTO();
+        orderDTO.userID = 1L;                  // for testing: id of a_user
+        orderDTO.orderID = 106001;
+        return orderDTO;
+    }
+}</code></pre>
+<ul>
+<li>Invoke it with <b><code>b_user</code></b>'s credentials: the method runs, but the returned object's <code>userID</code> does not match the logged-in principal's id, so the response is <b>403 Forbidden</b> and the data is not sent.</li>
+<li>Invoke it with <b><code>a_user</code></b>'s credentials: the ids match and the order is returned.</li>
+</ul>
+<p>Note: the method body <b>has already executed</b> by then (a write would already have happened), so use <code>@PostAuthorize</code> for reads and put the cheap check in <code>@PreAuthorize</code> when you can.</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Method security works through Spring AOP proxies, so it applies only when the call goes <b>through the proxy</b>: a method calling another annotated method on <code>this</code> (self-invocation) bypasses the check, and it works on Spring beans only (the same limitation as @Transactional).</li>
+<li>Put the annotations on the <b>service layer</b> as well if the logic can be reached from outside the controller.</li>
+<li>Related: <code>@Secured("ROLE_ADMIN")</code> and <code>@RolesAllowed</code> are simpler (no SpEL), and <code>@PreFilter</code>/<code>@PostFilter</code> filter collections.</li>
+<li>Unauthenticated gives <b>401</b>; authenticated but lacking the role/permission gives <b>403</b>. Handle <code>AccessDeniedException</code> with a <code>@ControllerAdvice</code> or <code>AccessDeniedHandler</code> for a custom body.</li>
+<li>Roles are coarse ("what kind of user"), permissions are fine-grained ("what action"); granting permissions to roles in the DB keeps the annotations stable while access rules change.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>@PreAuthorize vs @PostAuthorize?</summary><p>Pre checks before the method runs (can use arguments); Post checks after, using <code>returnObject</code>, before the response is returned.</p></details>
+<details><summary>hasRole vs hasAuthority?</summary><p>hasRole adds the <code>ROLE_</code> prefix; hasAuthority matches the exact string. Both look at the same granted authorities.</p></details>
+<details><summary>My @PreAuthorize is ignored. Why?</summary><p>Method security is not enabled (<code>@EnableMethodSecurity</code>), or the call bypasses the proxy (self-invocation, non-bean, final/private method).</p></details>
+<details><summary>URL-based vs annotation-based authorization?</summary><p>URL rules are central and coarse; annotations sit next to the code, support SpEL and method arguments/return values, and scale better in big APIs. Many apps use both.</p></details>
+<details><summary>How do you let users see only their own data?</summary><p><code>@PreAuthorize("#id == authentication.principal.id")</code>, or <code>@PostAuthorize</code> on the returned object's owner.</p></details>
+</div>

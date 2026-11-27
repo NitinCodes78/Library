@@ -1,0 +1,67 @@
+<h1>The Java Platform: JVM, JRE, JDK</h1>
+<p class="kicker">How a .java file becomes something your computer can run, and what you actually install.</p>
+
+<h2>What is Java?</h2>
+<ul>
+<li>A <b>platform independent</b> language.</li>
+<li><b>Portable</b>: <b>WORA</b>, "Write Once, Run Anywhere", made possible by the <b>JVM</b>.</li>
+<li>Object oriented (OOPS).</li>
+</ul>
+
+<h2>How code runs</h2>
+<div class="flow"><b>Java program<br><small>Student.java</small></b><i>javac compiles</i><b>Bytecode<br><small>Student.class</small></b><i>JVM</i><b>Machine code</b><i>runs on</i><b>CPU → output</b></div>
+<ul>
+<li>The <b>Java program</b> and the <b>bytecode</b> are <b>platform independent</b>.</li>
+<li>The <b>JVM is platform dependent</b>. macOS and Windows each have their own JVM, and that is exactly why the same bytecode runs on both.</li>
+</ul>
+<p><b>Compile:</b> <code>javac Student.java</code> gives bytecode and creates <code>Student.class</code>.</p>
+
+<h2>The three components</h2>
+<p>They sit inside each other like layers: <b>JDK ⊃ JRE ⊃ JVM</b>.</p>
+<div class="nest"><div class="n3">JDK<div class="n2">JRE<div class="n1">JVM</div></div></div></div>
+
+<table>
+<tr><th>Part</th><th>What it is</th><th>Contains</th></tr>
+<tr><td><b>JVM</b><br>Java Virtual Machine</td><td>An <b>abstract machine</b>, not physical. Runs the bytecode and turns it into machine code.</td><td>Has the <b>JIT</b> (Just-In-Time compiler)</td></tr>
+<tr><td><b>JRE</b><br>Java Runtime Environment</td><td>What you need to <i>run</i> Java programs.</td><td><b>JVM + class libraries</b> such as <code>java.util</code>, <code>java.math</code></td></tr>
+<tr><td><b>JDK</b><br>Java Development Kit</td><td>What you need to <i>develop</i> Java programs.</td><td><b>JRE + compiler (javac) + debugger</b> and the programming features like <code>System.out.println</code></td></tr>
+</table>
+<p><b>JDK = JRE + (compiler + debugger + …)</b></p>
+<p>JVM, JDK and JRE are all <b>platform dependent</b>, but the <b>code is platform independent</b>.</p>
+<p>You download a JDK by version: <b>21, 17, 8</b> and so on. A newer version has newer features in the JDK.</p>
+
+<h2>Java editions</h2>
+<table>
+<tr><th>Edition</th><th>Meaning</th></tr>
+<tr><td><b>JSE</b></td><td>Java Standard Edition. Core Java: OOPs, multithreading, etc.</td></tr>
+<tr><td><b>JEE</b></td><td>Java Enterprise Edition (now Jakarta EE). JSE + certain APIs like Transactional (rollback, commit), Servlets, JSP, etc.</td></tr>
+<tr><td><b>JME</b></td><td>Java Micro / Mobile Edition. Provides APIs for mobile.</td></tr>
+</table>
+
+<h2>Your first program: the rules</h2>
+<ol>
+<li><b>File name == class name</b> (for the public class).</li>
+<li><b>One file, only one public class.</b></li>
+<li><code>main()</code> is the <b>starting point</b> of the program, inside the public class.</li>
+</ol>
+<p>Rules 1 and 2 also answer a question: how does Java know which class has <code>main()</code>? Because the public class has the same name as the file, so it knows where to look.</p>
+<p>The JVM takes the bytecode and calls <code>main()</code>:</p>
+<pre><code class="java">public static void main(String[] args) {
+    System.out.println("Hello, Java");
+}</code></pre>
+<pre><code class="bash">javac Employee.java     # compile
+java Employee           # run</code></pre>
+<p>If we make any change in the <code>.java</code> file, we have to <b>compile it again</b> for the change to reflect.</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><b>JIT compiler:</b> instead of interpreting bytecode line by line forever, the JVM watches for "hot" code (called often) and compiles it to native machine code while the program is running. That is why Java gets faster after warm-up.</li>
+<li>Why <code>public static void main</code>? <b>public</b>: the JVM must reach it from outside. <b>static</b>: the JVM calls it without creating an object. <b>void</b>: it returns nothing to the JVM. <b>String[] args</b>: command-line arguments.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Is Java platform independent? Is the JVM?</summary><p>Java code (bytecode) is platform independent. The JVM is platform dependent: each operating system has its own JVM that understands the same bytecode.</p></details>
+<details><summary>JDK vs JRE vs JVM?</summary><p>JVM runs bytecode. JRE = JVM + libraries, to run programs. JDK = JRE + compiler and tools, to build programs.</p></details>
+<details><summary>What is bytecode?</summary><p>The intermediate instructions in a <code>.class</code> file produced by <code>javac</code>. It is not tied to any CPU.</p></details>
+<details><summary>What does the JIT compiler do?</summary><p>It converts frequently executed bytecode into native machine code at runtime to speed up execution.</p></details>
+</div>

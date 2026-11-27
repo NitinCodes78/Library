@@ -1,0 +1,110 @@
+<h1>@Transactional: Part 1</h1>
+<p class="kicker">Why we need transactions, ACID, and how Spring turns one annotation into begin, commit and rollback using AOP.</p>
+
+<h2>The critical section problem</h2>
+<p>A <b>critical section</b> is a code segment where shared resources are accessed and modified.</p>
+<pre><code class="java">// Book a car with id 1001
+Read the car row with id 1001
+If status is Available:
+    Update it to Booked</code></pre>
+<p>When <b>multiple requests</b> reach this section at the same time, two users can both read "Available" and both book the car: <b>data inconsistency</b>. The solution is a <b>transaction</b>, which gives us the <b>ACID</b> properties.</p>
+<table>
+<tr><th>Letter</th><th>Property</th><th>Meaning</th></tr>
+<tr><td><b>A</b></td><td>Atomicity</td><td>All operations in the transaction complete, or none do. If any operation fails, the entire transaction is rolled back.</td></tr>
+<tr><td><b>C</b></td><td>Consistency</td><td>The database state before and after the transaction is consistent (all rules and constraints hold).</td></tr>
+<tr><td><b>I</b></td><td>Isolation</td><td>Even when many transactions run in parallel, they do not interfere with each other.</td></tr>
+<tr><td><b>D</b></td><td>Durability</td><td>Once committed, the data is never lost, even after a crash.</td></tr>
+</table>
+<pre><code>BEGIN_TRANSACTION;
+  Debit from A
+  Credit to B
+  if all success:  COMMIT;
+  else:            ROLLBACK;
+END_TRANSACTION;</code></pre>
+
+<h2>Using @Transactional in Spring Boot</h2>
+<ol>
+<li>Add the dependency. For a relational database that is <b>Spring Data JPA</b>, which lets you talk to the database without writing much code (a database driver dependency is also needed, covered later):
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-data-jpa&lt;/artifactId&gt;
+&lt;/dependency&gt;</code></pre></li>
+<li>Activate transaction management with <code>@EnableTransactionManagement</code> on the main class. Spring Boot <b>auto-configures it</b>, so you normally do not need to add it.</li>
+</ol>
+<pre><code class="java">@SpringBootApplication
+@EnableTransactionManagement      // optional with Spring Boot
+public class SpringbootApplication {
+    public static void main(String[] args) { SpringApplication.run(SpringbootApplication.class, args); }
+}</code></pre>
+
+<h3>Class level vs method level</h3>
+<div class="cols2">
+<div class="card"><h4>On the class</h4><p>The transaction applies to <b>all public methods</b> of the class.</p>
+<pre><code class="java">@Transactional
+public class User {
+    public void a() { }
+    public void b() { }
+    private void c() { }   // not transactional
+}</code></pre></div>
+<div class="card"><h4>On a method</h4><p>The transaction applies to <b>that method only</b>.</p>
+<pre><code class="java">public class User {
+    @Transactional
+    public void updateUser() { }
+    public void other() { }
+}</code></pre></div>
+</div>
+
+<h2>How does it work? AOP again</h2>
+<p>Transaction management in Spring Boot is built on <b>AOP</b>.</p>
+<ol>
+<li>A pointcut expression finds methods carrying <code>@Transactional</code>, like <code>@within(org.springframework.transaction.annotation.Transactional)</code>.</li>
+<li>Once it matches, an <b><code>@Around</code> advice</b> runs. That advice is the method <code>invokeWithinTransaction</code> in the <code>TransactionInterceptor</code> class.</li>
+</ol>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+    @Autowired User user;
+
+    @GetMapping(path = "/updateUser")
+    public String updateUser() {
+        user.updateUser();
+        return "user is updated successfully";
+    }
+}
+
+@Component
+public class User {
+    @Transactional
+    public void updateUser() {
+        System.out.println("UPDATE QUERY TO update the user db values");
+    }
+}</code></pre>
+<p>What the proxy effectively does around <code>updateUser()</code>:</p>
+<pre><code class="java">// inside invokeWithinTransaction (simplified)
+BEGIN_TRANSACTION;
+try {
+    // YOUR TASK: updateUser() body runs here
+    COMMIT;                         // all success: commit the transaction
+} catch (Throwable ex) {
+    ROLLBACK;                       // exception: rollback (per the rollback rules)
+    throw ex;
+}</code></pre>
+<div class="flow"><b>Caller</b><i>calls</i><b>Proxy</b><i>begin transaction</i><b>Your method</b><i>success</i><b>Commit</b></div>
+
+<div class="box extra"><strong>Rollback rules (a favourite question)</strong>
+<ul>
+<li>By default Spring rolls back on <b>unchecked exceptions</b> (<code>RuntimeException</code>) and <code>Error</code>. A <b>checked exception does not trigger rollback</b> unless you ask: <code>@Transactional(rollbackFor = Exception.class)</code>.</li>
+<li>If you catch the exception inside the method and swallow it, the proxy never sees it, so it <b>commits</b>.</li>
+<li><b>Self-invocation</b> (one method calling another <code>@Transactional</code> method of the same class) bypasses the proxy, so no new transaction starts.</li>
+<li>Only <b>public</b> methods are proxied by default.</li>
+</ul></div>
+
+<h2>What comes next</h2>
+<p>With the basic working clear, the next chapters go deep into: transaction context, transaction manager (programmatic and declarative), propagation (<code>REQUIRED</code>, <code>REQUIRES_NEW</code>, <code>SUPPORTS</code>, <code>NOT_SUPPORTED</code>, <code>MANDATORY</code>, <code>NEVER</code>, <code>NESTED</code>), isolation levels (<code>READ_UNCOMMITTED</code>, <code>READ_COMMITTED</code>, <code>REPEATABLE_READ</code>, <code>SERIALIZABLE</code>), transaction timeout and read-only transactions.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>How does @Transactional work internally?</summary><p>Spring creates a proxy around the bean (AOP). The proxy's <code>TransactionInterceptor</code> begins a transaction before the method, commits on success and rolls back on a qualifying exception.</p></details>
+<details><summary>Does a checked exception roll back the transaction?</summary><p>Not by default. Use <code>rollbackFor</code>.</p></details>
+<details><summary>Why does @Transactional not work on a method called from the same class?</summary><p>Self-invocation skips the proxy.</p></details>
+<details><summary>What is ACID?</summary><p>Atomicity, Consistency, Isolation, Durability.</p></details>
+</div>

@@ -1,0 +1,116 @@
+<h1>Dynamic Bean Initialization</h1>
+<p class="kicker">One interface, two implementations: how to tell Spring which one to inject, from a fixed name to a value in application.properties.</p>
+
+<h2>The problem: unsatisfied dependency</h2>
+<p><code>Order</code> is an interface with two implementations, and the controller asks for an <code>Order</code> without saying which one.</p>
+<pre><code class="java">public interface Order {
+    public void createOrder();
+}
+
+@Component
+public class OnlineOrder implements Order {
+    public OnlineOrder() { System.out.println("Online Order Initialized"); }
+    public void createOrder() { System.out.println("created Online Order"); }
+}
+
+@Component
+public class OfflineOrder implements Order {
+    public OfflineOrder() { System.out.println("Offline Order initialized"); }
+    public void createOrder() { System.out.println("created Offline Order"); }
+}
+
+@RestController
+@RequestMapping(value = "/api")
+public class User {
+    @Autowired
+    Order order;                          // which one?
+
+    @PostMapping("/createOrder")
+    public ResponseEntity&lt;String&gt; createOrder() {
+        order.createOrder();
+        return ResponseEntity.ok("");
+    }
+}</code></pre>
+<p>The application <b>fails to start</b> with an <code>UnsatisfiedDependencyException: Error creating bean with name 'user'</code>. Both beans were created (you can see both "initialized" lines), but Spring cannot pick one to inject.</p>
+
+<h2>Fix 1: @Qualifier (static choice)</h2>
+<p>Give each bean a name and name the one you want at the injection point.</p>
+<pre><code class="java">@Qualifier("onlineOrderObject")
+@Component
+public class OnlineOrder implements Order { ... }
+
+@Qualifier("offlineOrderObject")
+@Component
+public class OfflineOrder implements Order { ... }
+
+@RestController
+public class User {
+    @Qualifier("onlineOrderObject")
+    @Autowired
+    Order order;                          // always the online one
+}</code></pre>
+<p>Both beans are still created at startup, but <code>createOrder()</code> now prints "created Online Order". The choice is <b>hard-coded</b>.</p>
+
+<h2>Fix 2: inject both and decide at runtime</h2>
+<p>If the decision depends on the request, inject <b>both</b> with their own qualifier and choose inside the method.</p>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api")
+public class User {
+
+    @Qualifier("onlineOrderObject")
+    @Autowired
+    Order onlineOrderObj;
+
+    @Qualifier("offlineOrderObject")
+    @Autowired
+    Order offlineOrderObj;
+
+    @PostMapping("/createOrder")
+    public ResponseEntity&lt;String&gt; createOrder(@RequestParam boolean isOnlineOrder) {
+        if (isOnlineOrder) {
+            onlineOrderObj.createOrder();
+        } else {
+            offlineOrderObj.createOrder();
+        }
+        return ResponseEntity.ok("");
+    }
+}</code></pre>
+
+<h2>Fix 3: decide once, from configuration (@Bean + @Value)</h2>
+<p>Remove <code>@Component</code> from the implementations and let a <code>@Configuration</code> class build the right one based on a property. Now only <b>one</b> of them is ever created.</p>
+<pre><code class="java">@Configuration
+public class AppConfig {
+
+    @Bean
+    public Order createOrderBean(@Value("${isOnlineOrder}") boolean isOnlineOrder) {
+        if (isOnlineOrder) {
+            return new OnlineOrder();
+        } else {
+            return new OfflineOrder();
+        }
+    }
+}</code></pre>
+<pre><code>application.properties
+isOnlineOrder=false</code></pre>
+<p>With <code>isOnlineOrder=false</code> the log shows only "Offline Order initialized", and the endpoint prints "created Offline Order". The controller is simply <code>@Autowired Order order;</code>.</p>
+
+<h2>@Value</h2>
+<p><code>@Value</code> injects values from various sources: a <b>property file</b>, <b>environment variables</b> or an <b>inline literal</b>.</p>
+<pre><code class="java">@Value("false") boolean isOnlineOrder              // inline literal
+@Value("${isOnlineOrder}") boolean isOnlineOrder   // from application.properties
+@Value("${isOnlineOrder:false}") boolean flag      // with a default if the key is missing</code></pre>
+
+<table>
+<tr><th>Approach</th><th>Beans created</th><th>When the choice is made</th></tr>
+<tr><td>@Qualifier</td><td>both</td><td>in code, fixed</td></tr>
+<tr><td>Inject both</td><td>both</td><td>per request, at runtime</td></tr>
+<tr><td>@Bean + @Value</td><td>only one</td><td>at startup, from configuration</td></tr>
+</table>
+
+<div class="box extra"><strong>Good to know</strong>
+<p>Fix 3 is the idea behind <code>@ConditionalOnProperty</code> and <code>@Profile</code> (next chapters), which express "create this bean only if..." in a cleaner, declarative way.</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Two beans implement the same interface. How do you pick one?</summary><p><code>@Primary</code> for a default, <code>@Qualifier("name")</code> to choose explicitly, inject a <code>Map&lt;String, Order&gt;</code> or <code>List&lt;Order&gt;</code> to choose at runtime, or create only one using <code>@Bean</code>, <code>@ConditionalOnProperty</code> or <code>@Profile</code>.</p></details>
+<details><summary>What is the default name of a <code>@Component</code> bean?</summary><p>The class name with a lowercase first letter (<code>onlineOrder</code>).</p></details>
+</div>

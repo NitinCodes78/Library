@@ -1,0 +1,91 @@
+<h1>The Object Class and Nested Classes</h1>
+<p class="kicker">The parent of every class, and classes that live inside other classes.</p>
+
+<h2>The Object class</h2>
+<p><b>Every class in Java, implicitly or explicitly, extends the <code>Object</code> class.</b> It is the <b>ultimate parent</b>.</p>
+<ul>
+<li>If a class <b>does not</b> extend another class, it automatically extends <code>Object</code> by default.</li>
+<li>If a class <b>does</b> extend another class, it still <b>indirectly</b> extends <code>Object</code> through its parent: its parent will extend it.</li>
+</ul>
+<div class="flow"><b>Object<br><small>parent of all</small></b><i>extends</i><b>A</b><i>extends</i><b>B</b></div>
+<p><code>Object</code> provides methods such as <code>equals()</code>, <code>hashCode()</code>, <code>toString()</code>, <code>getClass()</code>, <code>wait()</code>, <code>notify()</code> and <code>notifyAll()</code>.</p>
+<p>Since it is the parent of all, we can <b>store a reference of any class in an <code>Object</code> variable</b>:</p>
+<pre><code class="java">Object obj1 = new Person();
+obj1.getClass();      // class Person</code></pre>
+
+<h2>Nested classes</h2>
+<p>A class declared <b>inside another class</b>. A nested class's scope can't be more than the outer class.</p>
+<div class="tree2">
+<div class="top">Nested class</div>
+<div class="kids">
+<div><b>Static nested class</b></div>
+<div><b>Non-static nested class</b> (Inner class)<div class="kids sm"><div>Local inner class</div><div>Member inner class</div><div>Anonymous inner class</div></div></div>
+</div></div>
+
+<h2>Static nested class</h2>
+<ol>
+<li>It doesn't have access to the <b>non-static instance variables and methods</b> of the outer class.</li>
+<li>Its object can be created <b>without creating an object of the outer class</b>.</li>
+<li>It can be <b>public, private, protected or default</b>.</li>
+</ol>
+<p>It is associated with the <b>class</b> of the outer class, not the <b>object</b> of the outer class.</p>
+<pre><code class="java">Outerclass.NestedClass nestedObj = new Outerclass.NestedClass();</code></pre>
+<p>Remember: a <b>top-level class</b> can be only <b>public or package-private (default)</b>, never <code>private</code> or <code>protected</code>. A nested class can use any of the four.</p>
+
+<h2>Member inner class (non-static)</h2>
+<p>It needs an <b>outer object first</b>:</p>
+<pre><code class="java">Outerclass outerClassObj = new Outerclass();
+Outerclass.Innerclass innerObj = outerClassObj.new Innerclass();</code></pre>
+
+<h2>Local inner class</h2>
+<ol>
+<li>Defined in <b>any block</b>, like a for loop, an if-condition block, a method, etc.</li>
+<li>Only the <b>default</b> access modifier.</li>
+<li><b>Can't be instantiated outside</b> this block.</li>
+</ol>
+<pre><code class="java">void display() {
+    class LocalInnerClass {
+        // ...
+    }
+    new LocalInnerClass();      // only usable inside display()
+}</code></pre>
+<p>Remember: if you want to invoke a method without creating the class's object, make that method <b>static</b>. Otherwise you get <b>"Non-static method cannot be referenced from a static context"</b>.</p>
+
+<h2>Inheriting an inner class</h2>
+<p>One inner class can inherit another inner class in the same outer class.</p>
+<div class="box ex"><strong>Static inner class inherited by another class</strong>
+<pre><code class="java">class OuterClass {
+    static class InnerClass { }
+}
+class SomeClass extends OuterClass.InnerClass { }</code></pre></div>
+<div class="box ex"><strong>If the inner class is not static</strong>
+<pre><code class="java">class SomeClass extends OuterClass.InnerClass {
+    SomeClass() {
+        new OuterClass().super();     // important!
+    }
+}</code></pre>
+<p>As you know, when a child constructor is invoked, it also invokes the parent constructor. But here the parent is an inner class, so it can only be accessed through an <b>object of the outer class</b> (since it is non-static).</p></div>
+
+<h2>Anonymous inner class</h2>
+<p>An inner class <b>without a name</b>. It is used when we want to <b>override the behaviour of a method for an abstract class or interface without even creating the subclass</b>. The compiler generates a name for it internally (<code>OuterClass$1.class</code>).</p>
+<p>Only <b>one object</b> can be created from an anonymous inner class, at the point of its definition.</p>
+<div class="box ex"><strong>Example</strong>
+<pre><code class="java">public abstract class Car {
+    public abstract void pressBreak();
+}
+
+// in main:
+Car audiCarObj = new Car() {          // Audi object created without creating an Audi class
+    @Override
+    public void pressBreak() {
+        // Audi's braking behaviour
+    }
+};
+audiCarObj.pressBreak();</code></pre></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Which class is the parent of all classes?</summary><p><code>java.lang.Object</code>.</p></details>
+<details><summary>Static nested class vs inner class?</summary><p>A static nested class needs no outer object and cannot touch the outer instance members. An inner class belongs to an outer object and can use its members directly.</p></details>
+<details><summary>Where are anonymous classes commonly used?</summary><p>Quick one-off implementations of an interface or abstract class, like listeners or comparators. Since Java 8, lambdas replace most of them for functional interfaces.</p></details>
+<details><summary>Can an inner class access private members of the outer class?</summary><p>Yes. Nested classes can access all members of the enclosing class, including private ones.</p></details>
+</div>

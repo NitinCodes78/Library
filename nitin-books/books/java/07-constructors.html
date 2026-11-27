@@ -1,0 +1,102 @@
+<h1>Constructors</h1>
+<p class="kicker">How an object comes to life, what Java adds for free, and how constructors call each other.</p>
+
+<h2>What a constructor is</h2>
+<ul>
+<li>Used to <b>create / initialize an instance</b>.</li>
+<li>Its <b>name is the same as the class name</b>.</li>
+<li>It has <b>no return type</b>.</li>
+<li>It <b>can't be static, final, abstract or synchronized</b>.</li>
+<li>It <b>can't be overridden</b>.</li>
+</ul>
+<pre><code class="java">Employee obj = new Employee();    // `new` lets us call the constructor</code></pre>
+<div class="box ex"><strong>Constructor or method?</strong>
+<pre><code class="java">class Employee {
+    Employee() { }              // constructor (same name as class, no return type)
+
+    int Employee() {            // a METHOD: it has a return type,
+        return 10;              // even though the name matches the class
+    }
+}</code></pre></div>
+
+<h3>Two rules explained</h3>
+<ol>
+<li>If a constructor were <b>static</b>, it could not access non-static variables, so it could not initialize them. So a constructor can't be static.</li>
+<li><b>Interfaces can't have constructors</b>, because we can't make their objects.</li>
+</ol>
+
+<h2>The default constructor</h2>
+<pre><code class="java">public class Calculation {
+    String name;
+}</code></pre>
+<p>Java gives this class a <b>default constructor</b>. It sets <code>name</code> to <code>null</code> and the other variables to their default values too.</p>
+<p><b>If we manually define any constructor, no default constructor is added.</b></p>
+<pre><code class="java">Calculation(String a) {
+    this.name = a;
+}
+
+Calculation c1 = new Calculation();         // ✗ error: a constructor with an argument is defined
+Calculation c2 = new Calculation("cat");    // ✓</code></pre>
+
+<h2>Private constructor</h2>
+<p>A <b>private constructor can't be instantiated</b> from outside. It is used in the <b>Singleton pattern</b>.</p>
+<pre><code class="java">public class Calculation {
+    private static Calculation instance;
+
+    private Calculation() { }
+
+
+    public static synchronized Calculation getInstance() {
+        if (instance == null) {
+            instance = new Calculation();   // created only once
+        }
+        return instance;                    // same object every time
+    }
+}
+
+Calculation c1 = new Calculation();           // ✗ private constructor
+Calculation obj = Calculation.getInstance();  // ✓</code></pre>
+<p>Other ways to get a singleton: eager initialization with <code>private static final Calculation INSTANCE = new Calculation();</code>, or an enum singleton. Only one object can be created this way.</p>
+
+<h2>Constructor chaining with this()</h2>
+<p><code>this(...)</code> calls another constructor <b>of the same class</b>.</p>
+<pre><code class="java">public class Calculation {
+    String name;
+    int empID;
+
+    Calculation() {
+        this(10);                    // → calls Calculation(int)
+    }
+    Calculation(int empID) {
+        this("sj", empID);           // → calls Calculation(String, int)
+    }
+    Calculation(String name, int empID) {
+        this.name = name;
+        this.empID = empID;
+    }
+}</code></pre>
+<div class="flow"><b>Calculation()</b><i>this(10)</i><b>Calculation(int)</b><i>this("sj", id)</i><b>Calculation(String, int)</b></div>
+<p class="sample">Rule worth remembering: <code>this(...)</code> (and <code>super(...)</code>) must be the <b>first statement</b> in a constructor.</p>
+
+<h2>Constructor chaining with super()</h2>
+<pre><code class="java">class Person {
+    Person() { System.out.println("Person"); }
+}
+class Manager extends Person {
+    Manager() { System.out.println("Manager"); }
+}
+
+new Manager();     // prints: Person, then Manager</code></pre>
+<p>Creating a <code>Manager</code> prints <b>Person first, then Manager</b>. It goes from <b>top to bottom</b>. This is because there is a <b>hidden <code>super()</code></b> as the first line of the Manager constructor. Java adds it by default.</p>
+<div class="flow"><b>Object</b><i>super()</i><b>Person</b><i>super()</i><b>Manager</b></div>
+<p>Java calls <code>super()</code> automatically <b>only for no-arg constructors</b>. So if Person has only:</p>
+<pre><code class="java">Person(int empID) { }</code></pre>
+<p>then in <code>Manager</code> we have to <b>explicitly call <code>super(empID)</code></b> for this constructor to be invoked. Otherwise it will not compile.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Can a constructor be private? Why would you?</summary><p>Yes. It blocks <code>new</code> from outside the class. Used for Singletons, utility classes and factory methods.</p></details>
+<details><summary>Does Java always give a default constructor?</summary><p>No, only when you write no constructor at all. Write any constructor and the default disappears.</p></details>
+<details><summary>Can constructors be inherited or overridden?</summary><p>Neither. A child's constructor can call the parent's with <code>super()</code>, but constructors are not inherited.</p></details>
+<details><summary>Can you call this() and super() in the same constructor?</summary><p>No. Both must be the first statement, so you can only use one.</p></details>
+<details><summary>What is the order of construction in inheritance?</summary><p>Parent constructor runs first, then child.</p></details>
+</div>

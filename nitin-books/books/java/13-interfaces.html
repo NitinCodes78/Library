@@ -1,0 +1,142 @@
+<h1>Interfaces</h1>
+<p class="kicker">Contracts, polymorphism, and how Java gets multiple inheritance without the diamond.</p>
+
+<h2>Interface rules</h2>
+<p>An interface's <b>object can't be created</b>.</p>
+<ol>
+<li>Only <b>public and default</b> access modifiers are allowed for a top-level interface (<code>protected</code> and <code>private</code> are not).</li>
+<li>It <b>can extend</b> a comma-separated list of parent <b>interfaces</b>. It cannot extend a class.
+<pre><code class="java">interface A extends B, C { }     // B and C are interfaces</code></pre></li>
+<li>Helps to achieve <b>polymorphism</b>: different classes override and provide different behaviours for the same method, e.g. <code>fly()</code> overridden by say 10 classes.</li>
+<li>In Java, <b>multiple inheritance is possible only through interfaces</b>. No diamond problem, because the implementing class has to provide the implementation of all its parents' methods (no clash).</li>
+<li>All methods in an interface are implicitly <b>public</b> and abstract. They can't be <code>protected</code> or <code>private</code> (private is allowed from Java 9, see below), and can't be declared <code>final</code>.</li>
+<li>Fields in an interface are implicitly <b>public, static and final</b>. Can't make them private or protected: <code>int val = 2000;</code></li>
+<li>Overriding methods in the child should <b>also be public</b> and must override all the methods declared in the interface.</li>
+<li>A child <b>abstract class</b> is not forced to provide implementation of all the methods in the interface.</li>
+</ol>
+
+<h3>Polymorphism through an interface</h3>
+<div class="flow"><b>Bird<br><small>interface: fly()</small></b><i>implemented by</i><b>Eagle</b><b>Hen</b></div>
+<pre><code class="java">Bird birdObject1 = new Eagle();
+Bird birdObject2 = new Hen();     // the Bird variable holds the reference of the classes which implement it
+
+birdObject1.fly();                // which fly() runs is decided at runtime: Eagle's or Hen's
+birdObject2.fly();                // so: polymorphism</code></pre>
+
+<h3>Abstract child class</h3>
+<pre><code class="java">public interface Bird {
+    public void canFly();
+    public void noOfLegs();
+}
+
+public abstract class Eagle implements Bird {
+    @Override
+    public void canFly() { }
+    public abstract void beakLength();
+}
+// Eagle's child class has to override noOfLegs() and beakLength()</code></pre>
+
+<h3>Nested interface</h3>
+<p>Declared <b>within another interface</b> (must be public) <b>or within a class</b> (can have any access modifier).</p>
+<p>When you implement the outer interface, the inner interface's implementation is <b>not required</b>, and vice versa.</p>
+<pre><code class="java">class Eagle implements Bird.NonFlyingBird { }
+
+Bird.NonFlyingBird obj = new Eagle();</code></pre>
+
+<h2>Interface vs abstract class</h2>
+<table>
+<tr><th>Abstract class</th><th>Interface</th></tr>
+<tr><td>Can have both abstract and non-abstract methods.</td><td>Abstract methods; <b>from Java 8</b> onwards also default, static and (Java 9) private methods, which carry an implementation.</td></tr>
+<tr><td>Can extend one class and implement multiple interfaces.</td><td>Can only extend other interfaces.</td></tr>
+<tr><td>Variables and methods can be private, protected, public, default.</td><td>Public by default. (Java 9 onwards, private methods are supported.)</td></tr>
+<tr><td>Multiple inheritance is <b>not</b> supported (one parent class).</td><td>Multiple inheritance <b>is</b> supported.</td></tr>
+<tr><td>Can provide the implementation of an interface.</td><td>Cannot provide implementation of an interface or abstract class (beyond default methods).</td></tr>
+<tr><td>Can have a <b>constructor</b>.</td><td>Cannot have a constructor.</td></tr>
+<tr><td>To declare a method abstract, use the <code>abstract</code> keyword (public, protected or default).</td><td>No keyword needed: methods are abstract and public by default.</td></tr>
+</table>
+<p>Two things to keep in mind: an interface <b>variable</b> is always a <code>public static final</code> constant, whereas an abstract class can hold ordinary instance state. And since Java 8 an interface <i>can</i> carry implementation via <code>default</code>/<code>static</code> methods, which the next sections cover.</p>
+<div class="box extra"><strong>When to pick which</strong>
+<p>Use an <b>interface</b> for a capability or contract that unrelated classes can share (<code>Comparable</code>, <code>Runnable</code>). Use an <b>abstract class</b> for a family of closely related classes that share state and common code.</p></div>
+
+<h2>Default methods (Java 8 onwards)</h2>
+<p>Before Java 8, an interface could have only abstract methods, and every child class had to provide implementations.</p>
+<p><b>The drawback:</b> suppose I have to add a new method to an interface. Then <b>all its children</b> have to provide its implementation, and all existing code breaks.</p>
+<pre><code class="java">public interface Bird {
+    public void canFly();
+
+    default int methA() {      // just with default, we are able to provide implementation
+        return 100;
+    }
+}</code></pre>
+<p><code>default</code> is not an access modifier; it is a different concept. The method is <b>public by default</b>. Now all its children can use <code>methA</code>, and none of them breaks.</p>
+<p>We can't have <code>default static int methA()</code>. They are contradictory: <b>static</b> belongs to the interface itself, whereas <b>default</b> provides a concrete implementation for <b>instances of the classes that implement the interface</b>.</p>
+
+<h3>The diamond problem comes back</h3>
+<p>An interface can extend multiple interfaces. If two parent interfaces have a default method with the <b>same name</b>, then the child has to provide its implementation. This is the solution. Three ways to handle default methods when inheriting:</p>
+<pre><code class="java">public interface A {
+    default boolean canBreathe() { return true; }
+}
+
+// 1st way: just inherit (works fine)
+public interface B extends A { }
+class C implements B { }
+C obj = new C();
+obj.canBreathe();                      // ✓
+
+// 2nd way: re-declare it as abstract
+public interface B extends A {
+    boolean canBreathe();              // it has now become abstract
+}
+class C implements B {
+    public boolean canBreathe() {      // has to provide implementation
+        return true;
+    }
+}
+
+// 3rd way: provide an overriding implementation
+public interface Bird extends LivingThing {
+    default boolean canBreathe() {
+        boolean canBreatheOrNot = LivingThing.super.canBreathe();
+        // do something else
+        return canBreatheOrNot;
+    }
+}</code></pre>
+<div class="box extra"><strong>Good to know: the two-parents clash</strong>
+<p>When a class implements two interfaces that both have the same default method, the compiler forces you to override it. Inside you can pick one explicitly: <code>InterfaceA.super.method();</code>. A <b>class method always wins</b> over an interface default.</p></div>
+
+<h2>Static methods in an interface (Java 8)</h2>
+<ol>
+<li>It can provide the implementation of the method in the interface.</li>
+<li>But it <b>can't be overridden</b> by classes which implement the interface.</li>
+<li>We access it using the <b>interface name</b> itself: <code>Bird.helper()</code>.</li>
+<li>It's <b>public by default</b>.</li>
+</ol>
+<p>A child can create the same method, but it will belong to that child class only (it's not overridden, so don't use <code>@Override</code>).</p>
+<p><b>Default methods can be overridden, but not static.</b></p>
+
+<h2>Private methods in an interface (Java 9)</h2>
+<ul>
+<li>We can provide the implementation of a method, but with the <code>private</code> access modifier.</li>
+<li>Cannot be accessed <b>outside this interface</b>; not inherited by child classes or sub-interfaces.</li>
+<li>Brings more <b>readability</b>: if multiple default methods share some code, this can help.</li>
+<li>Cannot be abstract, so it must have a body.</li>
+</ul>
+<pre><code class="java">default int addEven(int... nums) {
+    return sumDigits(nums);
+}
+
+private int sumDigits(int... nums) {     // helper method
+    // ...
+}</code></pre>
+<p>We know in Java, a static method only calls static members (variables/methods), while a non-static method can access both. A similar rule applies here:</p>
+<ul>
+<li>From a <b>static</b> interface method, we can only call a <b>private static</b> interface method.</li>
+<li>A <b>private static</b> interface method can be called from both static and non-static methods.</li>
+</ul>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why were default methods added in Java 8?</summary><p>To evolve interfaces (like adding <code>forEach</code> to <code>Iterable</code>) without breaking every existing implementation.</p></details>
+<details><summary>How does Java avoid the diamond problem?</summary><p>Classes get one parent class only. For interfaces with clashing defaults, the compiler forces you to override and choose explicitly.</p></details>
+<details><summary>Can an interface have a constructor? Why not?</summary><p>No. It holds no instance state to initialise and cannot be instantiated.</p></details>
+<details><summary>What is a marker interface?</summary><p>An interface with no methods, like <code>Serializable</code> or <code>Cloneable</code>, used to tag a class with a capability.</p></details>
+</div>

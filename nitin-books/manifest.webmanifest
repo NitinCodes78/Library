@@ -1,0 +1,3 @@
+{"name":"Nitin's Books","short_name":"Books","start_url":"./","display":"standalone",
+ "background_color":"#f3e9d2","theme_color":"#f3e9d2",
+ "icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}

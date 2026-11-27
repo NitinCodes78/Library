@@ -1,0 +1,120 @@
+<h1>JPA: Part 1 (JDBC, JdbcTemplate, ORM)</h1>
+<p class="kicker">Before JPA: how Java talks to a database with JDBC, the boilerplate that hurts, and what JdbcTemplate takes off your hands.</p>
+
+<h2>The big picture</h2>
+<div class="flow"><b>Application logic</b><i>ORM framework (interface: JPA)</i><b>Hibernate (implementation)</b><i>JDBC (interface)</i><b>DB driver (implementation)</b><i>SQL</i><b>Relational DB</b></div>
+<p>The pattern repeats: an <b>interface</b> (JPA, JDBC) and an <b>implementation</b> (Hibernate, the vendor's driver).</p>
+
+<h2>Recall JDBC</h2>
+<p><b>JDBC (Java Database Connectivity)</b> provides an interface to <b>connect to the DB</b>, <b>query the DB</b> and <b>process the result</b>. The actual implementation comes from the database-specific driver:</p>
+<table>
+<tr><th>Database</th><th>Driver</th><th>Class</th></tr>
+<tr><td>MySQL</td><td>Connector/J</td><td><code>com.mysql.cj.jdbc.Driver</code></td></tr>
+<tr><td>PostgreSQL</td><td>PostgreSQL JDBC Driver</td><td><code>org.postgresql.Driver</code></td></tr>
+<tr><td>H2 (in-memory)</td><td>H2 Database Engine</td><td><code>org.h2.Driver</code></td></tr>
+</table>
+<pre><code class="java">public class DatabaseConnection {
+
+    public Connection getConnection() throws Exception {
+        Class.forName("org.h2.Driver");                                 // driver class loading
+        return DriverManager.getConnection("jdbc:h2:mem:userDB", "sa", "");   // connection making
+    }
+
+    public void insertUser() {
+        String sqlQuery = "INSERT INTO users(user_name, age) VALUES (?, ?)";
+        try (Connection con = getConnection();
+             PreparedStatement preparedQuery = con.prepareStatement(sqlQuery)) {
+            preparedQuery.setString(1, "X");
+            preparedQuery.setInt(2, 27);
+            preparedQuery.executeUpdate();
+        } catch (Exception e) {
+            // exception handling
+        }                                                               // closing of resources
+    }
+}</code></pre>
+<p><code>Connection</code>, <code>Statement</code>, <code>PreparedStatement</code> and <code>ResultSet</code> are all <b>interfaces</b> provided by JDBC; each driver implements them.</p>
+
+<h3>The boilerplate problem</h3>
+<ul>
+<li>Driver class loading</li>
+<li>DB connection making</li>
+<li>Exception handling</li>
+<li>Closing the connection and other objects (Statement, ResultSet ...)</li>
+<li>Manual handling of the DB connection pool</li>
+</ul>
+
+<h2>JdbcTemplate: Spring takes care of the boilerplate</h2>
+<table>
+<tr><th>Boilerplate</th><th>What JdbcTemplate does</th></tr>
+<tr><td>Driver class loading</td><td>Handled at application startup (registered with <code>DriverManager</code>).</td></tr>
+<tr><td>DB connection making</td><td>Taken care of whenever you execute a query.</td></tr>
+<tr><td>Exception handling</td><td>Plain JDBC gives one vague, checked <code>SQLException</code>. JdbcTemplate translates it into granular unchecked exceptions such as <code>DuplicateKeyException</code> and <code>QueryTimeoutException</code> (package <code>org.springframework.dao</code>).</td></tr>
+<tr><td>Closing resources</td><td>After <code>update</code> or <code>query</code>, success or failure, it closes the resources or returns the connection to the pool.</td></tr>
+<tr><td>Connection pool</td><td>Spring Boot provides a default pool: <b>HikariCP</b> (default maximum pool size 10).</td></tr>
+</table>
+<p>Tune the pool in <code>application.properties</code>:</p>
+<pre><code>spring.datasource.hikari.maximum-pool-size=10
+spring.datasource.hikari.minimum-idle=5</code></pre>
+<p>Or define your own pool bean:</p>
+<pre><code class="java">@Configuration
+public class AppConfig {
+    @Bean
+    public DataSource dataSource() {
+        HikariDataSource dataSource = new HikariDataSource();
+        dataSource.setDriverClassName("org.h2.Driver");
+        dataSource.setJdbcUrl("jdbc:h2:mem:userDB");
+        dataSource.setUsername("sa");
+        dataSource.setPassword("");
+        return dataSource;
+    }
+}</code></pre>
+
+<h3>Frequently used JdbcTemplate methods</h3>
+<table>
+<tr><th>Method</th><th>Use</th></tr>
+<tr><td><code>update(String sql, Object... args)</code></td><td>INSERT / UPDATE / DELETE</td></tr>
+<tr><td><code>update(String sql, PreparedStatementSetter pss)</code></td><td>INSERT / UPDATE / DELETE with explicit parameter setting</td></tr>
+<tr><td><code>query(String sql, RowMapper&lt;T&gt;)</code></td><td>Get multiple rows</td></tr>
+<tr><td><code>queryForList(String sql, Class&lt;T&gt;)</code></td><td>One column of multiple rows</td></tr>
+<tr><td><code>queryForObject(sql, args, Class&lt;T&gt;)</code></td><td>Get a single row</td></tr>
+<tr><td><code>queryForObject(sql, Class&lt;T&gt;)</code></td><td>Get a single value (count, max ...)</td></tr>
+</table>
+<pre><code class="java">// insert / update / delete
+String insertQuery = "INSERT INTO users (user_name, age) VALUES (?, ?)";
+int rowsAffected = jdbcTemplate.update(insertQuery, "X", 27);
+
+String updateQuery = "UPDATE users SET age = ? WHERE user_id = ?";
+int rows = jdbcTemplate.update(updateQuery, 29, 1);
+
+// with PreparedStatementSetter
+jdbcTemplate.update(insertQuery, (PreparedStatement ps) -&gt; {
+    ps.setString(1, "X");
+    ps.setInt(2, 25);
+});
+
+// multiple rows with a RowMapper
+List&lt;User&gt; users = jdbcTemplate.query("SELECT * FROM users", (rs, rowNum) -&gt; {
+    User user = new User();
+    user.setUserId(rs.getInt("user_id"));
+    user.setUserName(rs.getString("user_name"));
+    user.setAge(rs.getInt("age"));
+    return user;
+});
+
+// one column of many rows
+List&lt;String&gt; userNames = jdbcTemplate.queryForList("SELECT user_name FROM users", String.class);
+
+// single row (BeanPropertyRowMapper maps columns to fields)
+User user = jdbcTemplate.queryForObject("SELECT * FROM users WHERE user_id = ?",
+        new BeanPropertyRowMapper&lt;&gt;(User.class), 2);
+
+// single value
+int userCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class);</code></pre>
+<div class="box extra"><strong>Why JPA is still needed</strong>
+<p>JdbcTemplate removes the plumbing, but you still write <b>SQL strings</b> and map every column to a field by hand. An <b>ORM (Object-Relational Mapping)</b> framework removes that too: you work with objects and the framework generates the SQL. That is the job of <b>JPA</b> (the specification) and <b>Hibernate</b> (the most popular implementation), covered next.</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>JDBC vs JdbcTemplate vs JPA?</summary><p>JDBC: low-level API, lots of boilerplate. JdbcTemplate: Spring helper that handles connections, resources and exceptions but you still write SQL. JPA: object-relational mapping, the framework generates SQL.</p></details>
+<details><summary>What is a connection pool and what is the Spring Boot default?</summary><p>A set of reusable DB connections (opening one is expensive). Default is HikariCP, maximum pool size 10.</p></details>
+<details><summary>Why is a PreparedStatement better than concatenating SQL?</summary><p>It prevents SQL injection and lets the DB reuse the parsed query.</p></details>
+</div>

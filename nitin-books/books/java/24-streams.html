@@ -1,0 +1,198 @@
+<h1>Streams (Java 8)</h1>
+<p class="kicker">Process a collection as a pipeline: filter, transform, collect. Very commonly asked in interviews.</p>
+
+<h2>What is a stream?</h2>
+<p>Useful to deal with <b>bulk processing</b> (and it can do parallel processing). Direct practice questions are asked in interviews to do things with a Stream.</p>
+<div class="diag">
+<div class="row"><div class="cb"><b>Collection</b></div></div>
+<div class="row"><div class="cb wide"><b>Step 1: create stream</b><br><small>from a data source like a collection or array</small></div></div>
+<div class="row"><div class="cb wide"><b>Step 2: intermediate operations</b><br><small>filter(), sorted(), map(), distinct() ...<br>transform the stream into another stream; more operations can be done on top. <b>Lazy</b>.</small></div></div>
+<div class="row"><div class="cb wide"><b>Step 3: terminal operation</b><br><small>collect(), reduce(), count() ...<br>triggers the processing and produces the output. Only <b>one</b> terminal operation can be used.</small></div></div>
+</div>
+<p>Intermediate operations are <b>lazy in nature</b>: they get executed only when a terminal operation is invoked. Terminal operations trigger the processing of the stream and produce the output. After a terminal operation, no more operations can be performed.</p>
+<p><b>The original data remains unchanged</b> after streaming; the result (new list, array etc.) is separate.</p>
+
+<h3>Example</h3>
+<pre><code class="java">List&lt;Integer&gt; salaryList = new ArrayList&lt;&gt;(Arrays.asList(3000, 4100, 9000, 1000, 3500));
+
+// native way
+int count = 0;
+for (Integer salary : salaryList) {
+    if (salary &gt; 3000) count++;
+}
+System.out.println(count);    // 3
+
+// using stream
+long output = salaryList.stream()
+        .filter((Integer sal) -&gt; sal &gt; 3000)
+        .count();</code></pre>
+<ol>
+<li>The native <code>for</code> loop is <b>faster</b>, because streams have extra overhead: creating the stream pipeline, lambda invocation per element, and possible boxing/unboxing if not a primitive stream (<code>IntStream</code>). But the difference is usually <b>microseconds</b>.</li>
+<li>Streams have <b>cleaner, more readable code</b>.</li>
+<li>For very huge datasets, <code>parallelStream()</code> helps.</li>
+</ol>
+
+<h2>Different ways to create a stream</h2>
+<h3>1. From a collection</h3>
+<pre><code class="java">List&lt;Integer&gt; salaryList = Arrays.asList(3000, 4100, 9000, 1000, 3500);
+Stream&lt;Integer&gt; str = salaryList.stream();</code></pre>
+<p>Via <code>Arrays.asList</code> we cannot change the size of the list. If I call <code>list.add(5000)</code> or <code>list.remove(0)</code>, Java will throw <code>UnsupportedOperationException</code> at runtime. We may do <code>list.set(0, 5000)</code> to change the value at that index, because <code>Arrays.asList()</code> is a <b>fixed-size view</b> of the underlying array. For a normal (mutable) list: <code>new ArrayList&lt;&gt;(Arrays.asList(3000, 4000))</code>.</p>
+<p><b><code>List.of(...)</code></b> (read-only) cannot be modified at all. It is strictly immutable. If we try <code>add()</code>, <code>remove()</code> or even <code>set()</code>, the program will throw <code>UnsupportedOperationException</code>. It doesn't even allow null values, whereas <code>Arrays.asList()</code> allows them. For a normal list: <code>new ArrayList&lt;&gt;(List.of(3000, 4000))</code>.</p>
+<h3>2. From an array</h3>
+<pre><code class="java">Integer[] sal = {3000, 4100, 9000, 1000, 3500};
+Stream&lt;Integer&gt; str = Arrays.stream(sal);</code></pre>
+<h3>3. From a static method</h3>
+<pre><code class="java">Stream&lt;Integer&gt; str = Stream.of(1000, 3500, 4000);</code></pre>
+<h3>4. From a Stream.Builder</h3>
+<pre><code class="java">Stream.Builder&lt;Integer&gt; streamBuilder = Stream.builder();
+streamBuilder.add(1000).add(9000).add(3500);
+Stream&lt;Integer&gt; str = streamBuilder.build();</code></pre>
+<h3>5. From Stream.iterate</h3>
+<pre><code class="java">Stream&lt;Integer&gt; str = Stream.iterate(1000, (Integer n) -&gt; n + 5000).limit(5);
+//                                  ^ start point
+// stream of: 1000, 6000, 11000, 16000, 21000</code></pre>
+
+<h2>Intermediate operations</h2>
+<h3>1. filter(Predicate&lt;T&gt;)</h3>
+<pre><code class="java">Stream&lt;String&gt; nameStream = Stream.of("Hello", "Every", "How", "ARB");
+Stream&lt;String&gt; filteredStream = nameStream.filter((String name) -&gt; name.length() &lt;= 3);
+List&lt;String&gt; filteredNameList = filteredStream.collect(Collectors.toList());   // [How, ARB]</code></pre>
+<h3>2. map(Function&lt;T,R&gt;)</h3>
+<pre><code class="java">Stream&lt;String&gt; filteredNames = nameStream.map((String name) -&gt; name.toLowerCase());
+// need a terminal operation too, like collecting to list</code></pre>
+<h3>3. flatMap(Function&lt;T, Stream&lt;R&gt;&gt;)</h3>
+<p>Turns a stream of lists into <b>one flat stream</b>.</p>
+<pre><code class="java">List&lt;List&lt;String&gt;&gt; sentenceList = Arrays.asList(
+    Arrays.asList("I", "LOVE", "JAVA"),
+    Arrays.asList("Concepts", "Are", "Clear"),
+    Arrays.asList("It", "Is", "Very", "easy")
+);
+
+Stream&lt;String&gt; wsl = sentenceList.stream()
+        .flatMap((List&lt;String&gt; sentence) -&gt; sentence.stream());
+// terminal operation needed. Output: I, LOVE, JAVA, Concepts, Are, Clear, It, ...
+
+Stream&lt;String&gt; ws2 = sentenceList.stream()
+        .flatMap((List&lt;String&gt; sentence) -&gt; sentence.stream().map((String value) -&gt; value.toLowerCase()));
+// output: i, love, java, concepts ...</code></pre>
+<h3>4. distinct()</h3>
+<pre><code class="java">Integer[] arr = {1, 5, 2, 7, 4, 0, 9, 9};
+Stream&lt;Integer&gt; allStream = Arrays.stream(arr).distinct();</code></pre>
+<h3>5. sorted()</h3>
+<pre><code class="java">Arrays.stream(arr).sorted();</code></pre>
+<h3>6. peek()</h3>
+<p>Helps you to <b>see the intermediate result</b> of the stream which is getting processed.</p>
+<pre><code class="java">List&lt;Integer&gt; numbers = Arrays.asList(2, 1, 3, 4, 6);
+Stream&lt;Integer&gt; numberStream = numbers.stream()
+        .filter((Integer val) -&gt; val &gt; 2)
+        .peek((Integer val) -&gt; System.out.println(val))     // 3, 4, 6 printed
+        .map((Integer val) -&gt; -1 * val);
+List&lt;Integer&gt; numberList = numberStream.collect(Collectors.toList());</code></pre>
+<h3>7. limit(n) and skip(n)</h3>
+<pre><code class="java">numbers.stream().limit(3);      // truncate the stream to the first 3
+numbers.stream().skip(3);       // skips the first n elements of the stream</code></pre>
+<h3>8. mapToInt() (and mapToLong, mapToDouble)</h3>
+<p>Helps to work with the primitive <code>int</code> data types.</p>
+<pre><code class="java">List&lt;String&gt; numbers = Arrays.asList("2", "1", "4", "7");
+IntStream ns = numbers.stream().mapToInt((String val) -&gt; Integer.parseInt(val));
+int[] numArray = ns.toArray();</code></pre>
+
+<h2>Why are intermediate operations "lazy"?</h2>
+<pre><code class="java">List&lt;Integer&gt; numbers = Arrays.asList(2, 1, 4, 7, 10);
+Stream&lt;Integer&gt; numStream = numbers.stream()
+        .filter((Integer val) -&gt; val &gt;= 3)
+        .peek((Integer val) -&gt; System.out.println(val));
+// Output: nothing would be printed
+
+numStream.count();       // count is one of the terminal operations
+// Output: 4  7  10</code></pre>
+
+<h2>Sequence of stream operations (it's different than you think)</h2>
+<pre><code class="java">List&lt;Integer&gt; numbers = Arrays.asList(2, 1, 4, 7, 10);
+Stream&lt;Integer&gt; numberStream = numbers.stream()
+        .filter((Integer val) -&gt; val &gt;= 3)
+        .peek((Integer val) -&gt; System.out.println("after filter: " + val))
+        .map((Integer val) -&gt; val * -1)
+        .peek((Integer val) -&gt; System.out.println("after negating: " + val))
+        .sorted()
+        .peek((Integer val) -&gt; System.out.println("after sorted: " + val));
+List&lt;Integer&gt; filteredNumberStream = numberStream.collect(Collectors.toList());</code></pre>
+<table>
+<tr><th>You might expect</th><th>Actual output</th></tr>
+<tr><td>after filter: 4, 7, 10<br>after negating: -4, -7, -10<br>after sorted: -10, -7, -4</td>
+<td>after filter: 4<br>after negating: -4<br>after filter: 7<br>after negating: -7<br>after filter: 10<br>after negating: -10<br>after sorted: -10<br>after sorted: -7<br>after sorted: -4</td></tr>
+</table>
+<p>It just says: <b>pick 4, then do all the operations on it</b> like filter, negating etc., until an operation is reached that requires all the elements too, like <code>sorted</code>. Then it does the same for 7, then 10, then <code>sorted</code> is performed on all of them.</p>
+<div class="diag"><div class="row"><div class="cb">4<br><small>filter &rarr; map</small></div><div class="cb">7<br><small>filter &rarr; map</small></div><div class="cb">10<br><small>filter &rarr; map</small></div><div class="cb wide">sorted (waits for all three)<br><small>then the rest flows one by one</small></div></div></div>
+
+<h2>Terminal operations</h2>
+<p>The ones that <b>produce the result</b>. They <b>trigger the processing</b> of the stream.</p>
+<h3>forEach</h3>
+<pre><code class="java">numbers.stream().filter((Integer val) -&gt; val &gt;= 3)
+       .forEach((Integer val) -&gt; System.out.println(val));</code></pre>
+<h3>toArray()</h3>
+<pre><code class="java">Object[] a1 = numbers.stream().filter(val -&gt; val &gt;= 3).toArray();
+
+Integer[] a2 = numbers.stream().filter(val -&gt; val &gt;= 3)
+        .toArray((int size) -&gt; new Integer[size]);       // if I want type Integer</code></pre>
+<h3>reduce()</h3>
+<p>Performs an <b>associative aggregation function</b>.</p>
+<pre><code class="java">Optional&lt;Integer&gt; rv = numbers.stream()
+        .reduce((Integer val1, Integer val2) -&gt; val1 + val2);
+System.out.println(rv.get());</code></pre>
+<h3>collect()</h3>
+<pre><code class="java">List&lt;Integer&gt; fN = numbers.stream().filter(val -&gt; val &gt;= 3)
+        .collect(Collectors.toList());</code></pre>
+<h3>min() and max()</h3>
+<p>Gives the min or max from the stream based on the <b>comparator</b>.</p>
+<pre><code class="java">Optional&lt;Integer&gt; mT1 = numbers.stream()
+        .filter(val -&gt; val &gt;= 3)
+        .min((Integer val1, Integer val2) -&gt; Integer.compare(val1, val2));   // gives min
+
+Optional&lt;Integer&gt; mT2 = numbers.stream()
+        .filter(val -&gt; val &gt;= 3)
+        .max((Integer val1, Integer val2) -&gt; Integer.compare(val1, val2));   // gives max</code></pre>
+<p>Use <code>max()</code> for the maximum (or <code>.max(Comparator.naturalOrder())</code>). Reversing the comparator inside <code>min()</code> works but is confusing, and the subtraction trick can overflow (see the Comparator chapter).</p>
+<h3>count(), matching and finding</h3>
+<table>
+<tr><th>Operation</th><th>Returns</th></tr>
+<tr><td><code>count()</code></td><td><code>long</code> number of elements</td></tr>
+<tr><td><code>anyMatch(predicate)</code></td><td>true if <b>any</b> value matches</td></tr>
+<tr><td><code>allMatch(predicate)</code></td><td>true if <b>all</b> values match</td></tr>
+<tr><td><code>noneMatch(predicate)</code></td><td>true if <b>none</b> match</td></tr>
+<tr><td><code>findFirst()</code></td><td>the first element of the stream (Optional)</td></tr>
+<tr><td><code>findAny()</code></td><td>any random element of the stream (Optional)</td></tr>
+</table>
+<pre><code class="java">long n = numbers.stream().count();
+boolean flag = numbers.stream().anyMatch((Integer val) -&gt; val &gt; 3);
+numbers.stream().filter(val -&gt; val &gt;= 3).findFirst();</code></pre>
+
+<h2>How many times can we use a single stream?</h2>
+<p>Once a terminal operation is used on a stream, it is <b>closed / consumed</b> and can't be used again for another terminal operation. We'll have to create a new stream.</p>
+<pre><code class="java">Stream&lt;Integer&gt; s = numbers.stream();
+s.count();
+s.count();     // ✗ IllegalStateException: stream has already been operated upon or closed</code></pre>
+
+<h2>Parallel stream</h2>
+<p>Helps to perform operations on the stream <b>concurrently</b>, taking advantage of a <b>multi-core CPU</b>. The <code>parallelStream()</code> method is used instead of the regular <code>stream()</code> method. Internally it does:</p>
+<ul>
+<li><b>Task splitting:</b> it uses a <b>Spliterator</b> to split the data into multiple chunks.</li>
+<li><b>Task submission and parallel processing:</b> uses the <b>Fork-Join pool</b> technique.</li>
+</ul>
+<div class="diag">
+<div class="row"><div class="cb wide">Task &nbsp; <code>numbers.parallelStream()</code></div></div>
+<div class="row"><div class="cb">Sub-task<br><small>fork()</small></div><div class="cb">Sub-task<br><small>fork()</small></div></div>
+<div class="row"><div class="cb sm">sub</div><div class="cb sm">sub</div><div class="cb sm">sub</div><div class="cb sm">sub</div></div>
+<div class="row"><div class="cb">join sub-task results</div><div class="cb">join sub-task results</div></div>
+<div class="row"><div class="cb wide"><b>Output</b></div></div></div>
+<p>Time taken is reduced significantly.</p>
+<div class="box extra"><strong>Good to know: when NOT to go parallel</strong>
+<p>Parallel streams share one common pool, so they only pay off for <b>big</b> data and <b>CPU-heavy, independent</b> work. For small lists the splitting overhead makes it slower, and lambdas must not mutate shared state or depend on order (use <code>forEachOrdered</code> if you need order). Don't use them for blocking I/O.</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>map vs flatMap?</summary><p><code>map</code> converts each element to one element. <code>flatMap</code> converts each element to a stream and flattens them all into one stream.</p></details>
+<details><summary>Intermediate vs terminal operations?</summary><p>Intermediate return a stream and are lazy; terminal return a result or nothing and start the pipeline.</p></details>
+<details><summary>Does a stream modify the source collection?</summary><p>No. It produces a new result; the source is untouched.</p></details>
+<details><summary>Find the second highest salary / group by a field / count words: how?</summary><p><code>sorted(Comparator.reverseOrder()).skip(1).findFirst()</code>; <code>collect(Collectors.groupingBy(...))</code>; <code>Collectors.groupingBy(w -&gt; w, Collectors.counting())</code>.</p></details>
+<details><summary>Stream vs Collection?</summary><p>A collection stores data. A stream is a one-time pipeline over data: it doesn't store anything and can't be reused.</p></details>
+</div>

@@ -1,0 +1,128 @@
+<h1>HATEOAS</h1>
+<p class="kicker">Hypermedia As The Engine Of Application State: let the response tell the client what it can do next.</p>
+
+<h2>What is it?</h2>
+<p><b>HATEOAS</b> = Hypermedia As The Engine Of Application State. It tells the client <b>what next action it can perform on a particular item</b>.</p>
+<h3>Example: user onboarding</h3>
+<div class="flow"><b>POST /adduser</b><i>creates</i><b>Unverified user</b><i>POST /sms-verify-start</i><b>SMS verify started</b><i>POST /sms-verify-finish</i><b>Verified user</b></div>
+<p>An unverified user can be fetched (GET), removed (DELETE), or verified through SMS or through email (<code>email-verify-start</code> then <code>email-verify-finish</code>). Which call is valid depends on the user's current state.</p>
+<p>The response of <code>POST /adduser</code>:</p>
+<div class="cols2">
+<div class="card"><h4>Without HATEOAS</h4>
+<pre><code>{
+  "userID": "123456",
+  "name": "SJ",
+  "verifyStatus": "UNVERIFIED"
+}</code></pre></div>
+<div class="card"><h4>With a HATEOAS link</h4>
+<pre><code>{
+  "userID": "123456",
+  "name": "SJ",
+  "verifyStatus": "UNVERIFIED",
+  "links": [{
+    "rel": "self",
+    "href": "http://localhost:8080/api/getUser/123456",
+    "type": "GET"
+  }]
+}</code></pre></div>
+</div>
+
+<h2>When and why to use it</h2>
+<p>The two major purposes are:</p>
+<ul>
+<li><b>Loose coupling</b></li>
+<li><b>API discovery</b></li>
+</ul>
+<p>The server provides the <b>next set of actions (APIs)</b> inside the response, so the client needs <b>less business logic</b> about which API to call, when and how.</p>
+
+<h3>Do not add every possible action</h3>
+<p>Adding all the next actions bloats the response and has several costs: <b>more complexity on the server</b>, <b>latency impact</b> and <b>larger payload size</b>. Never add all possible next actions "just like that". Analyse what actually helps to achieve loose coupling.</p>
+<pre><code>"links": [
+  { "rel": "self",          "href": ".../api/getUser/123456",         "type": "GET" },
+  { "rel": "remove",        "href": ".../api/removeUser/123456",      "type": "DELETE" },
+  { "rel": "update",        "href": ".../api/updateUser/123456",      "type": "PATCH" },
+  { "rel": "verify-start",  "href": ".../api/sms-verify-start/123456","type": "POST" },
+  { "rel": "verify-finish", "href": ".../api/sms-verify-finish/123456","type": "POST" }
+]       // too much: this is the bloated version to avoid</code></pre>
+
+<h3>Where the real coupling is</h3>
+<p>In the onboarding flow, the tight coupling lies in the <b>verify</b> process. The client needs extra information before it can decide which verify API to invoke:</p>
+<pre><code class="java">// client has to carry this business logic
+if (verifyStatus == "UNVERIFIED") {
+    if (verifyType == "SMS") {
+        if (verifyState == "NOT_YET_STARTED")  call POST /sms-verify-start
+        else if (verifyState == "STARTED")     call POST /sms-verify-finish
+    } else if (verifyType == "EMAIL") {
+        if (verifyState == "NOT_YET_STARTED")  call POST /email-verify-start
+        else                                   call POST /email-verify-finish
+    }
+}</code></pre>
+<p>This dependency is removed by a HATEOAS link. The server decides the next step and sends just that:</p>
+<pre><code>{
+  "userID": "123456",
+  "name": "SJ",
+  "verifyStatus": "UNVERIFIED",
+  "links": [{
+    "rel": "verify",
+    "href": "http://localhost:8080/api/sms-verify-finish/123456",
+    "type": "POST"
+  }]
+}</code></pre>
+<p>Now the client code is tiny and <b>loosely coupled</b>:</p>
+<pre><code class="java">if (verifyStatus == "UNVERIFIED") {
+    // invoke the verify URI given in the HATEOAS link
+}</code></pre>
+
+<h2>Implementation</h2>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-hateoas&lt;/artifactId&gt;
+&lt;/dependency&gt;</code></pre>
+<p>(No version is needed: Spring Boot's parent manages it.) The notes build a small base class that holds a list of links, and make the response extend it:</p>
+<pre><code class="java">public class HateoasLinks {
+    private List&lt;Link&gt; links = new ArrayList&lt;&gt;();
+
+    public void addLink(Link link) { links.add(link); }
+    public List&lt;Link&gt; getLinks() { return links; }
+}
+
+public class UserResponse extends HateoasLinks {
+    private String userID;
+    private String name;
+    private String verifyStatus;
+    // getters and setters
+}
+
+@RestController
+@RequestMapping("/api")
+public class UserController {
+
+    @PostMapping(path = "/adduser")
+    public ResponseEntity&lt;UserResponse&gt; addUser(@RequestBody UserRequest request) {
+        UserResponse response = userService.addUser(request);
+
+        Link verifyLink = linkTo(UserController.class)
+                .slash("sms-verify-finish")
+                .slash(response.getUserID())
+                .withRel("verify")
+                .withType("POST");
+        response.addLink(verifyLink);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+}</code></pre>
+<p>Another way to create a link, by hand:</p>
+<pre><code class="java">Link verifyLink = Link.of("/api/sms-verify-finish/" + response.getUserID())
+        .withRel("verify")
+        .withType("POST");</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Spring HATEOAS also has ready-made models: <code>EntityModel&lt;T&gt;</code>, <code>CollectionModel&lt;T&gt;</code> and <code>RepresentationModel</code>; you can extend <code>RepresentationModel</code> instead of writing your own base class, and <code>linkTo(methodOn(UserController.class).getUser(id))</code> builds links from real controller methods so they never go stale.</li>
+<li>The <code>rel</code> value says <b>what the link means</b> (self, verify, next, cancel).</li>
+<li>HATEOAS is the top level (level 3) of the Richardson maturity model of REST.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What is HATEOAS and when would you use it?</summary><p>The response carries links to the next valid actions, so clients follow links instead of hard-coding URLs and state rules. Use it where the allowed next steps depend on server-side state (workflows like onboarding, order lifecycle).</p></details>
+<details><summary>What are its downsides?</summary><p>Bigger payloads, more server logic, extra latency, and most clients ignore the links anyway, so add only the links that remove real client logic.</p></details>
+</div>

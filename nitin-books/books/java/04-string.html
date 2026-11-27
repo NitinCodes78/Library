@@ -1,0 +1,44 @@
+<h1>String and the String Pool</h1>
+<p class="kicker">Why String is special: immutable, pooled, and the classic == vs equals trap.</p>
+
+<h2>What makes String special</h2>
+<ul>
+<li>Strings are <b>immutable</b>.</li>
+<li>Written as <b>string literals</b> (<code>"hello"</code>).</li>
+<li>String is <b>non-primitive</b>. It has inbuilt Java methods like <code>length()</code>, <code>charAt()</code>.</li>
+</ul>
+
+<h2>The String Constant Pool</h2>
+<p>Inside heap memory there is a special area, the <b>String Constant Pool</b>.</p>
+<pre><code class="java">String s1 = "hello";     // literal: goes into the pool
+String s2 = "hello";     // checks if already present → reuses it</code></pre>
+<div class="mem2"><div class="obj">s1</div><div class="obj">s2</div><div class="shared">Heap → String Constant Pool<br><b>"hello"</b></div></div>
+<p><code>s1 == s2</code> returns <b>true</b>: both point to the same object.</p>
+
+<h2>new String(...) is different</h2>
+<pre><code class="java">String s3 = new String("hello");   // not a literal any more</code></pre>
+<p>It <b>creates an object in the heap</b>, outside the pool, at a different address.</p>
+<table>
+<tr><th>Expression</th><th>Result</th><th>Why</th></tr>
+<tr><td><code>s1 == s3</code></td><td><b>false</b></td><td>different address in memory</td></tr>
+<tr><td><code>s1.equals(s3)</code></td><td><b>true</b></td><td>same content</td></tr>
+</table>
+
+<h2>Why "immutable" matters</h2>
+<pre><code class="java">s1 = "hello world";
+s1 = "SJ";</code></pre>
+<p>The pool now holds <code>"hello"</code>, <code>"hello world"</code> and <code>"SJ"</code>. The old values are <b>still present</b>: a String object is never changed, <code>s1</code> just points to a new one. Literals live in the String Constant Pool.</p>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Immutability is why pooling is safe: if one reference could change the shared <code>"hello"</code>, every other reference would see it.</li>
+<li>Also why String is safe as a <code>HashMap</code> key and across threads.</li>
+<li>For lots of changes, use <code>StringBuilder</code> (fast, not thread-safe) or <code>StringBuffer</code> (thread-safe), instead of making many String objects.</li>
+<li><code>s3.intern()</code> returns the pooled copy of a string.</li>
+</ul></div>
+<p>Also noted on this page: you <b>can't create an object of an interface</b>.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>== vs equals() on strings?</summary><p><code>==</code> compares references (same object?). <code>equals()</code> compares content. Always use <code>equals()</code> for text.</p></details>
+<details><summary>How many objects does <code>new String("hello")</code> create?</summary><p>Up to two: the literal <code>"hello"</code> in the pool (if not already there) and a new String object on the heap.</p></details>
+<details><summary>Why is String immutable?</summary><p>For pooling, security, thread safety and safe hashing. It lets Java share one object among many references.</p></details>
+</div>

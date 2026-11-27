@@ -1,0 +1,134 @@
+<h1>Generics</h1>
+<p class="kicker">Writing one class or method that works safely with many types, with no casting.</p>
+
+<h2>The problem generics solve</h2>
+<p>Without generics, a "box" class would hold an <code>Object</code>, the parent of all, so it accepts everything:</p>
+<pre><code class="java">public class Print {
+    Object value;
+    public Object get() { return value; }
+    public void set(Object value) { this.value = value; }
+}</code></pre>
+<p>We know a parent reference can hold a child object, so this works. But when you read it back, it is just an <code>Object</code>. If you stored a number, it is an <code>Integer</code>, so <b>you have to typecast every time</b> (e.g. <code>(int)</code>).</p>
+
+<h2>Generic class</h2>
+<pre><code class="java">public class Print&lt;T&gt; {
+    T value;
+    public T getPrintValue() { return value; }
+    public void setPrintValue(T value) { this.value = value; }
+}</code></pre>
+<p>The generic type <code>&lt;T&gt;</code> can be <b>any non-primitive object</b>.</p>
+<pre><code class="java">Print&lt;Integer&gt; printObj1 = new Print&lt;Integer&gt;();
+printObj1.setPrintValue(1);
+Integer printValue = printObj1.getPrintValue();
+if (printValue == 1) { }</code></pre>
+<p><b>No typecasting needed</b>, as we defined that this <code>Print</code> can hold only <code>Integer</code>, whereas in the earlier example it could be a String, an Integer or anything.</p>
+
+<h3>Subclassing a generic class</h3>
+<pre><code class="java">// (i) Non-generic subclass: fixes the type
+public class ColorPrint extends Print&lt;String&gt; { }
+
+// (ii) Generic subclass: keeps the type open
+public class ColorPrint&lt;T&gt; extends Print&lt;T&gt; { }</code></pre>
+
+<h3>More than one generic type</h3>
+<pre><code class="java">public class Pair&lt;K, V&gt; {
+    private K key;
+    private V value;
+    void put(K key, V value) {
+        this.key = key;
+        this.value = value;
+    }
+}
+
+new Pair&lt;&gt;();                       // both are correct
+new Pair&lt;Integer, String&gt;();</code></pre>
+
+<h2>Generic method</h2>
+<p>Make <b>only the method</b> generic, not the complete class.</p>
+<ul>
+<li>The <b>type parameter goes before the return type</b> in the method declaration.</li>
+<li>The type parameter's <b>scope is limited to that method only</b>.</li>
+</ul>
+<pre><code class="java">public &lt;K, V&gt; void printValue(Pair&lt;K, V&gt; pair1, Pair&lt;K, V&gt; pair2) {
+    if (pair2.getKey().equals(pair1.getKey())) {
+        // ...
+    }
+}</code></pre>
+
+<h2>Raw type</h2>
+<p>For <code>class Print&lt;T&gt; { }</code>, instead of</p>
+<pre><code class="java">Print&lt;String&gt; ptpO = new Print&lt;&gt;();   // internally it passes Object as the parameterized type</code></pre>
+<p>we <b>can</b> write:</p>
+<pre><code class="java">Print rppo = new Print();            // raw type object
+rppo.setPrintValue(1);</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p>Raw types exist only for backward compatibility with pre-generics code. They switch off the compiler's type checks, so avoid them in new code: you lose exactly the safety generics give.</p></div>
+
+<h2>Bounded generics</h2>
+<p>Can be used at generic <b>class and method</b>.</p>
+<ul>
+<li><b>Upper bound:</b> <code>&lt;T extends Number&gt;</code>. T can be of type <code>Number</code> or <b>its subclass only</b>.</li>
+<li><b>Multi bound:</b> <code>&lt;T extends SuperClass &amp; Interface1 &amp; InterfaceN&gt;</code>
+  <ul><li>The <b>first</b> restrictive type should be a <b>concrete class</b>.</li><li>The 2nd, 3rd and so on can be <b>interfaces</b>.</li></ul></li>
+</ul>
+<pre><code class="java">public class A extends ParentClass implements Interface1, Interface2 { }
+
+public class Print&lt;T extends ParentClass &amp; Interface1 &amp; Interface2&gt; { }</code></pre>
+<p><b>Not more than one concrete class</b> (the diamond problem again).</p>
+<p>When you create its object:</p>
+<pre><code class="java">Print&lt;A&gt; pobj = new Print&lt;&gt;();</code></pre>
+<p><code>A</code> must be a child of <code>ParentClass</code> <b>and</b> implement both <code>Interface1</code> and <code>Interface2</code>. If <code>A</code> only implemented <code>Interface1</code>, it could <b>not</b> be used in <code>pobj</code>.</p>
+
+<h2>Generics and inheritance</h2>
+<div class="flow"><b>Vehicle</b><i>extends</i><b>Car</b><b>Bus</b></div>
+<pre><code class="java">List&lt;Vehicle&gt; vehicleList = new ArrayList&lt;&gt;();
+List&lt;Bus&gt;     busList     = new ArrayList&lt;&gt;();
+
+vehicleList = busList;       // ✗ invalid
+Vehicle vehicleObj = busObj; // ✓ valid (just one object)</code></pre>
+<p>Why invalid? If it were allowed, <code>vehicleList</code> would reference <code>busList</code>, and then you could add a <b>Car</b> through it, but <code>busList</code> can only store buses, not cars. So <b><code>BusList</code> is not a child of <code>VehicleList</code></b>; only a <code>busObj</code> is a child of <code>vehicleObj</code>.</p>
+<pre><code class="java">void print(List&lt;Vehicle&gt; ls) { }
+print(busList);              // ✗ not valid: not a child</code></pre>
+
+<h2>Wildcards</h2>
+<p>The fix for the problem above.</p>
+<table>
+<tr><th>Kind</th><th>Syntax</th><th>Meaning</th></tr>
+<tr><td><b>Upper bounded</b></td><td><code>&lt;? extends UpperBound&gt;</code></td><td>that class <b>and below</b> (its subclasses)</td></tr>
+<tr><td><b>Lower bounded</b></td><td><code>&lt;? super LowerBound&gt;</code></td><td>that class <b>and above</b> (its parents)</td></tr>
+<tr><td><b>Unbounded</b></td><td><code>&lt;?&gt;</code></td><td>anything; <b>you can only read</b></td></tr>
+</table>
+<pre><code class="java">// (i) can accept a list of anything that is a Vehicle or below
+public void setPrintValue(List&lt;? extends Vehicle&gt; vehicleList) { }
+setPrintValue(busList);              // now it's valid
+
+// (ii) can accept a list of Vehicle or anything above it
+public void setPrintValue(List&lt;? super Vehicle&gt; vehicleList) { }
+List&lt;Object&gt; objList = new ArrayList&lt;&gt;();
+setPrintValue(objList);              // now it's valid</code></pre>
+
+<h3>Wildcard vs generic method</h3>
+<pre><code class="java">public void computeList(List&lt;? extends Number&gt; source, List&lt;? extends Number&gt; dest) { }
+// source can be a list of Integer and dest a list of Float
+
+public &lt;T extends Number&gt; void computeList(List&lt;T&gt; source, List&lt;T&gt; dest) { }
+// if source is Integer, dest also has to be Integer</code></pre>
+<p>With the generic method, <b>both lists must have the same T</b>. With wildcards, each list is free to be a different Number type.</p>
+<div class="box extra"><strong>Good to know: PECS</strong>
+<p>"<b>P</b>roducer <b>E</b>xtends, <b>C</b>onsumer <b>S</b>uper". Use <code>? extends T</code> when you only <i>read</i> from the collection, and <code>? super T</code> when you only <i>write</i> into it. You cannot add to a <code>List&lt;? extends Vehicle&gt;</code> (except <code>null</code>), because the compiler can't know the exact type.</p></div>
+
+<h2>Type erasure</h2>
+<p><b>Type erasure</b> is a process performed by the Java compiler <b>during compilation</b> (i.e. when converting to bytecode), where <b>all generic type information is removed</b> and replaced with their <b>bounds</b>, or with the <b>Object</b> class if unbounded.</p>
+<table>
+<tr><th>You write</th><th>Bytecode sees</th></tr>
+<tr><td><code>List&lt;T&gt;</code></td><td><code>List&lt;Object&gt;</code></td></tr>
+<tr><td><code>List&lt;T extends Number&gt;</code></td><td><code>List&lt;Number&gt;</code></td></tr>
+</table>
+<p>That is why generics exist only at compile time: at runtime a <code>List&lt;String&gt;</code> and a <code>List&lt;Integer&gt;</code> are the same class.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why can't generics hold primitives?</summary><p>Because of type erasure the type becomes <code>Object</code> or a bound, and primitives are not objects. Use wrappers: <code>List&lt;Integer&gt;</code>.</p></details>
+<details><summary>Is List&lt;Object&gt; a parent of List&lt;String&gt;?</summary><p>No. Generics are invariant. Use <code>List&lt;? extends Object&gt;</code> or <code>List&lt;?&gt;</code> to accept any list.</p></details>
+<details><summary>extends vs super in wildcards?</summary><p><code>? extends X</code>: X or subclasses, read-only. <code>? super X</code>: X or parents, good for writing.</p></details>
+<details><summary>What is type erasure and what follows from it?</summary><p>The compiler removes generic types after checking them. So you cannot do <code>new T()</code>, <code>instanceof List&lt;String&gt;</code>, or overload two methods that differ only in their generic type.</p></details>
+</div>

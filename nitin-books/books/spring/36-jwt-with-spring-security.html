@@ -1,0 +1,365 @@
+<h1>Spring Boot Security: JWT Authentication</h1>
+<p class="kicker">Building JWT login, token validation and refresh tokens on top of the Spring Security filter chain with a custom filter, token and provider.</p>
+
+<h2>What we are building</h2>
+<ul>
+<li>A <b>stateless</b> method: the server does not maintain the user's authentication state (no session).</li>
+<li>A JWT has three parts, <code>HEADER.PAYLOAD.SIGNATURE</code>. <b>Header:</b> metadata, including the signing algorithm. <b>Payload:</b> the claims (user id, role, expiry). <b>Signature:</b> ensures integrity. If the payload is changed (for example role <code>user</code> to <code>admin</code>), the recalculated signature will not match the original, so tampering is detected.</li>
+</ul>
+<p>Four steps:</p>
+<table>
+<tr><th>Step</th><th>API</th><th>What happens</th></tr>
+<tr><td>1. User creation</td><td><code>/api/user-register</code></td><td>Create the user (username, password, role).</td></tr>
+<tr><td>2. Token generation</td><td><code>/generate-token</code></td><td>User passes username and password; if they match, generate the JWT and return it.</td></tr>
+<tr><td>3. Token validation</td><td>any resource</td><td>The user passes the JWT; if valid, authenticate the user and let them access the resource.</td></tr>
+<tr><td>4. Refresh token</td><td><code>/refresh-token</code></td><td>Functionality for the user to refresh the JWT.</td></tr>
+</table>
+
+<h2>1st: user creation (dynamically)</h2>
+<p>Already seen in the user-creation chapter: an entity, a repository, a <code>UserDetailsService</code>, and a register API that stores the BCrypt-hashed password.</p>
+<pre><code class="java">public interface UserRegisterEntityRepository extends JpaRepository&lt;UserRegisterEntity, Long&gt; {
+    Optional&lt;UserRegisterEntity&gt; findByUsername(String username);
+}
+
+POST /api/user-register
+{ "username": "sj", "password": "123", "role": "ROLE_USER" }
+-&gt; "User registered successfully!"      (USER_REGISTER table: id, bcrypt password, role, username)</code></pre>
+
+<h2>2nd: token generation</h2>
+<p>Spring Boot gives <b>no default implementation</b> for JWT authentication, because different applications have different needs:</p>
+<ul>
+<li>the payload (some put only the username, some the id ...);</li>
+<li>the signing algorithm (RSA or HMAC);</li>
+<li>the token refresh strategy (some need it, some do not).</li>
+</ul>
+<p>So the onus is on the engineer, and there is no single solution; different engineers implement it differently. We will stick to the Security framework as much as possible.</p>
+
+<h3>Quick recap of the architecture</h3>
+<div class="flow"><b>Request</b><i>Security Filter Chain</i><b>Security filter creates an <code>Authentication</code> object</b><i>passes it to</i><b>AuthenticationManager</b><i>asks each</i><b>AuthenticationProvider</b><i>loads user</i><b>UserDetailsService</b><i>fully authenticated</i><b>SecurityContextHolder</b></div>
+<p>Notice one behaviour in this flow:</p>
+<ul>
+<li>The security filter creates an <code>Authentication</code> object with data from the request (username/password, session id, token ...), but it <b>does not know which AuthenticationProvider</b> can handle it.</li>
+<li>The <code>AuthenticationManager</code> (<code>ProviderManager</code>) has a <b>list</b> of providers. It calls the <code>supports()</code> method of each, passing the <code>Authentication</code> class, and the first one that returns true gets to call <code>authenticate()</code>.</li>
+</ul>
+<pre><code class="java">// ProviderManager (framework code, simplified)
+public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+    Class&lt;? extends Authentication&gt; toTest = authentication.getClass();
+    for (AuthenticationProvider provider : getProviders()) {
+        if (!provider.supports(toTest)) continue;
+        result = provider.authenticate(authentication);
+        if (result != null) { copyDetails(authentication, result); break; }
+    }
+    ...
+}
+
+// DaoAuthenticationProvider (via AbstractUserDetailsAuthenticationProvider)
+public boolean supports(Class&lt;?&gt; authentication) {
+    return UsernamePasswordAuthenticationToken.class.isAssignableFrom(authentication);
+}</code></pre>
+<p>We only need to <b>enhance</b> this for JWT:</p>
+<ol>
+<li>Add our <b>custom filter</b>.</li>
+<li>The custom filter creates a <b>custom Authentication object</b>.</li>
+<li>Create a <b>custom AuthenticationProvider</b> and add it to the AuthenticationManager's provider list.</li>
+<li>When the AuthenticationManager gets the custom Authentication object it checks all providers, and only our custom provider returns <code>true</code> from <code>supports()</code>, so the request is passed to it.</li>
+</ol>
+
+<h3>Code for token generation</h3>
+<p>First add the JWT dependencies:</p>
+<pre><code>&lt;dependency&gt;&lt;groupId&gt;io.jsonwebtoken&lt;/groupId&gt;&lt;artifactId&gt;jjwt-api&lt;/artifactId&gt;&lt;version&gt;0.11.5&lt;/version&gt;&lt;/dependency&gt;
+&lt;dependency&gt;&lt;groupId&gt;io.jsonwebtoken&lt;/groupId&gt;&lt;artifactId&gt;jjwt-impl&lt;/artifactId&gt;&lt;version&gt;0.11.5&lt;/version&gt;&lt;scope&gt;runtime&lt;/scope&gt;&lt;/dependency&gt;
+&lt;dependency&gt;&lt;groupId&gt;io.jsonwebtoken&lt;/groupId&gt;&lt;artifactId&gt;jjwt-jackson&lt;/artifactId&gt;&lt;version&gt;0.11.5&lt;/version&gt;&lt;scope&gt;runtime&lt;/scope&gt;&lt;/dependency&gt;</code></pre>
+<p>In token generation the user passes username/password and we match it with the stored ones. That is exactly what <code>DaoAuthenticationProvider</code> does, so we reuse it, and only if it matches we generate the token.</p>
+<pre><code class="java">public class LoginRequest {
+    private String username;
+    private String password;
+    // getters and setters
+}
+
+@Component
+public class JWTUtil {
+    private static final String SECRET_KEY = "your-secure-secret-key-min-32bytes";
+    private static final Key key = Keys.hmacShaKeyFor(SECRET_KEY.getBytes(StandardCharsets.UTF_8));
+
+    // Generate JWT token
+    public String generateToken(String username, long expiryMinutes) {
+        return Jwts.builder()
+                .setSubject(username)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + expiryMinutes * 60 * 1000))   // in milliseconds
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public String validateAndExtractUsername(String token) {
+        try {
+            return Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody()
+                    .getSubject();
+        } catch (JwtException e) {
+            return null;        // invalid or expired JWT
+        }
+    }
+}
+
+public class JWTAuthenticationFilter extends OncePerRequestFilter {
+
+    private final AuthenticationManager authenticationManager;
+    private final JWTUtil jwtUtil;
+
+    public JWTAuthenticationFilter(AuthenticationManager authenticationManager, JWTUtil jwtUtil) {
+        this.authenticationManager = authenticationManager;
+        this.jwtUtil = jwtUtil;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        if (!request.getServletPath().equals("/generate-token")) {     // only the login API
+            filterChain.doFilter(request, response);
+            return;
+        }
+        ObjectMapper objectMapper = new ObjectMapper();
+        LoginRequest loginRequest = objectMapper.readValue(request.getInputStream(), LoginRequest.class);
+
+        UsernamePasswordAuthenticationToken authToken =
+                new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword());
+        Authentication authResult = authenticationManager.authenticate(authToken);   // DaoAuthenticationProvider handles it
+
+        if (authResult.isAuthenticated()) {
+            String token = jwtUtil.generateToken(authResult.getName(), 15);           // 15 min
+            response.setHeader("Authorization", "Bearer " + token);
+        }
+    }
+}</code></pre>
+<p>The secret must be at least 32 bytes for HS256 and should come from configuration or a vault, not from code (kept inline here only for learning). Now the security config:</p>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    private JWTUtil jwtUtil;
+    private UserDetailsService userDetailsService;
+
+    @Autowired
+    public SecurityConfig(JWTUtil jwtUtil, UserDetailsService userDetailsService) {
+        this.jwtUtil = jwtUtil;
+        this.userDetailsService = userDetailsService;
+    }
+
+    @Bean
+    public DaoAuthenticationProvider daoAuthenticationProvider() {
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(userDetailsService);
+        provider.setPasswordEncoder(passwordEncoder());
+        return provider;
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, AuthenticationManager authenticationManager,
+                                                   JWTUtil jwtUtil) throws Exception {
+        JWTAuthenticationFilter jwtAuthFilter = new JWTAuthenticationFilter(authenticationManager, jwtUtil);
+
+        http.authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/api/user-register", "/generate-token").permitAll()
+                .anyRequest().authenticated())
+            .sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .csrf(csrf -&gt; csrf.disable())
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);    // our login filter
+        return http.build();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager() {
+        return new ProviderManager(Arrays.asList(daoAuthenticationProvider()));
+    }
+}</code></pre>
+<p>Test: <code>POST /generate-token</code> with <code>{"username":"sj","password":"123"}</code> returns <b>200 OK</b> and a response header <code>Authorization: Bearer eyJhbGci...</code>.</p>
+
+<h2>3rd: token validation</h2>
+<p>When the user tries to access any restricted resource, they pass the token in the Authorization header (in Postman: Auth type <b>Bearer Token</b>; the header is generated automatically). We need three pieces:</p>
+<pre><code class="java">// 1. Our custom Authentication object
+public class JwtAuthenticationToken extends AbstractAuthenticationToken {
+    private final String token;
+
+    public JwtAuthenticationToken(String token) {
+        super(null);
+        this.token = token;
+        setAuthenticated(false);          // not yet authenticated
+    }
+    public String getToken() { return token; }
+    @Override public Object getCredentials() { return token; }
+    @Override public Object getPrincipal() { return null; }
+}
+
+// 2. Our custom AuthenticationProvider
+public class JWTAuthenticationProvider implements AuthenticationProvider {
+    private JWTUtil jwtUtil;
+    private UserDetailsService userDetailsService;
+
+    public JWTAuthenticationProvider(JWTUtil jwtUtil, UserDetailsService userDetailsService) {
+        this.jwtUtil = jwtUtil;
+        this.userDetailsService = userDetailsService;
+    }
+
+    @Override
+    public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+        String token = ((JwtAuthenticationToken) authentication).getToken();
+        String username = jwtUtil.validateAndExtractUsername(token);
+        if (username == null) {
+            throw new BadCredentialsException("Invalid JWT Token");
+        }
+        UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+        return new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+    }
+
+    @Override
+    public boolean supports(Class&lt;?&gt; authentication) {
+        return JwtAuthenticationToken.class.isAssignableFrom(authentication);   // only our token type
+    }
+}
+
+// 3. The validation filter, runs on every request
+public class JwtValidationFilter extends OncePerRequestFilter {
+    private final AuthenticationManager authenticationManager;
+
+    public JwtValidationFilter(AuthenticationManager authenticationManager) {
+        this.authenticationManager = authenticationManager;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        String token = extractJwtFromRequest(request);
+        if (token != null) {
+            JwtAuthenticationToken authenticationToken = new JwtAuthenticationToken(token);
+            Authentication authResult = authenticationManager.authenticate(authenticationToken);
+            if (authResult.isAuthenticated()) {
+                SecurityContextHolder.getContext().setAuthentication(authResult);
+            }
+        }
+        filterChain.doFilter(request, response);
+    }
+
+    private String extractJwtFromRequest(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+        if (bearerToken != null &amp;&amp; bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        return null;
+    }
+}</code></pre>
+<p>Register them in the config: the provider as a bean, added to the <code>ProviderManager</code> list, and the validation filter added <b>after</b> the login filter:</p>
+<pre><code class="java">@Bean
+public JWTAuthenticationProvider jwtAuthenticationProvider() {
+    return new JWTAuthenticationProvider(jwtUtil, userDetailsService);
+}
+
+// in securityFilterChain:
+JwtValidationFilter jwtValidationFilter = new JwtValidationFilter(authenticationManager);
+http.authorizeHttpRequests(auth -&gt; auth
+        .requestMatchers("/api/user-register").permitAll()
+        .anyRequest().authenticated())
+    .sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+    .csrf(csrf -&gt; csrf.disable())
+    .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)     // generate token filter
+    .addFilterAfter(jwtValidationFilter, JWTAuthenticationFilter.class);             // validate token filter
+
+@Bean
+public AuthenticationManager authenticationManager() {
+    return new ProviderManager(Arrays.asList(
+            daoAuthenticationProvider(),
+            jwtAuthenticationProvider()));
+}</code></pre>
+<p>Now <code>GET /api/users</code> with the Bearer token returns <b>"fetched user details successfully"</b>. With an <b>invalid token</b> (for example with extra characters appended), the signature check fails, the request stays unauthenticated and the API answers <b>403 Forbidden</b> (as seen in this setup; a custom <code>AuthenticationEntryPoint</code> can make it a proper 401).</p>
+
+<h2>4th: refresh token</h2>
+<ul>
+<li>Access tokens are generally <b>short lived</b>.</li>
+<li>Once the access token expires, a <b>refresh token</b> (generally long lived) is used to obtain a new access token, <b>without requiring the user to log in again</b>.</li>
+</ul>
+<p>In the login filter, after generating the access token we also create a refresh token and put it into an <b>HttpOnly cookie</b>:</p>
+<pre><code class="java">if (authResult.isAuthenticated()) {
+    String token = jwtUtil.generateToken(authResult.getName(), 15);                  // 15 min access token
+    response.setHeader("Authorization", "Bearer " + token);
+
+    String refreshToken = jwtUtil.generateToken(authResult.getName(), 7 * 24 * 60);   // 7 days
+    // Set the refresh token in an HttpOnly cookie
+    // (we can also send it in the response body, but then the client has to keep it in local storage or in memory)
+    Cookie refreshCookie = new Cookie("refreshToken", refreshToken);
+    refreshCookie.setHttpOnly(true);               // prevent JavaScript from accessing it
+    refreshCookie.setSecure(true);                 // sent only over HTTPS
+    refreshCookie.setPath("/refresh-token");       // cookie sent only to the refresh endpoint
+    refreshCookie.setMaxAge(7 * 24 * 60 * 60);     // 7 days expiry
+    response.addCookie(refreshCookie);
+}</code></pre>
+<p>A new filter handles <code>/refresh-token</code>:</p>
+<pre><code class="java">public class JWTRefreshFilter extends OncePerRequestFilter {
+    private final AuthenticationManager authenticationManager;
+    private final JWTUtil jwtUtil;
+
+    public JWTRefreshFilter(JWTUtil jwtUtil, AuthenticationManager authenticationManager) {
+        this.jwtUtil = jwtUtil;
+        this.authenticationManager = authenticationManager;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        if (!request.getServletPath().equals("/refresh-token")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        String refreshToken = extractJwtFromRequest(request);       // read the cookie
+        if (refreshToken == null) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
+        JwtAuthenticationToken authenticationToken = new JwtAuthenticationToken(refreshToken);
+        Authentication authResult = authenticationManager.authenticate(authenticationToken);
+        if (authResult.isAuthenticated()) {
+            String newToken = jwtUtil.generateToken(authResult.getName(), 15);   // 15 min
+            response.setHeader("Authorization", "Bearer " + newToken);
+        }
+    }
+
+    private String extractJwtFromRequest(HttpServletRequest request) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) return null;
+        for (Cookie cookie : cookies) {
+            if ("refreshToken".equals(cookie.getName())) return cookie.getValue();
+        }
+        return null;
+    }
+}</code></pre>
+<p>Register it in the chain and allow the path:</p>
+<pre><code class="java">JWTRefreshFilter jwtRefreshFilter = new JWTRefreshFilter(jwtUtil, authenticationManager);
+http.authorizeHttpRequests(auth -&gt; auth
+        .requestMatchers("/api/user-register", "/refresh-token").permitAll()
+        .anyRequest().authenticated())
+    .sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+    .csrf(csrf -&gt; csrf.disable())
+    .addFilterAfter(jwtRefreshFilter, JwtValidationFilter.class);</code></pre>
+<p>After login the response has the <code>refreshToken</code> cookie (HttpOnly, Secure, path <code>/refresh-token</code>, expires in 7 days). Calling <code>/refresh-token</code> returns <b>200</b> with a <b>new access token set in the <code>Authorization</code> response header</b>.</p>
+
+<h2>Authorization</h2>
+<p>It works <b>exactly the same as in form and basic authentication</b>. The <code>AuthorizationFilter</code> is invoked, which matches the role required for the API with the roles present for the user. For example, if <code>/api/users</code> needs <code>ROLE_USER</code> but the user has <code>ROLE_ADMIN</code>, there is a mismatch and the response is <b>403 Forbidden</b>. (The roles come from <code>userDetails.getAuthorities()</code> that our provider put into the <code>Authentication</code>.)</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>For simple needs Spring has built-in support: <code>spring-boot-starter-oauth2-resource-server</code> validates JWTs with <code>http.oauth2ResourceServer(o -&gt; o.jwt(...))</code> and a <code>JwtDecoder</code>; hand-rolling the filters (as above) is great for understanding but in production the resource-server support is usually preferred.</li>
+<li>Refresh tokens should be <b>revocable</b>: store an id or hash server side so a stolen one can be invalidated, and rotate it on each use.</li>
+<li>With jjwt 0.12+ the builder methods changed (<code>subject()</code>, <code>issuedAt()</code>, <code>signWith(key)</code>, <code>Jwts.parser().verifyWith(key)</code>); the methods used above are the 0.11 style.</li>
+<li>Do not hard-code the secret; load it from an environment variable or secret manager.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why did we need a custom Authentication and AuthenticationProvider?</summary><p>The ProviderManager selects a provider using <code>supports(Class)</code>. A new <code>JwtAuthenticationToken</code> type lets only our provider handle token authentication, leaving the DAO provider for username/password.</p></details>
+<details><summary>Why OncePerRequestFilter?</summary><p>It guarantees the filter logic runs at most once per request even with forwards/dispatches.</p></details>
+<details><summary>Access token vs refresh token?</summary><p>Access: short-lived, sent on every call. Refresh: long-lived, used only against the refresh endpoint to get new access tokens; keep it in an HttpOnly cookie.</p></details>
+<details><summary>Why STATELESS and csrf.disable() here?</summary><p>The token travels in an explicit header, not an ambient session cookie, so no session is needed and CSRF is not relevant (revisit if tokens go in cookies).</p></details>
+</div>

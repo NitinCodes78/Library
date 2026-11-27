@@ -1,0 +1,148 @@
+<h1>@Transactional: Part 2</h1>
+<p class="kicker">Transaction managers, declarative vs programmatic control, and the seven propagation types.</p>
+
+<h2>Hierarchy of transaction managers</h2>
+<p>A <b>transaction manager</b> is the object that actually begins, commits and rolls back a transaction on the underlying resource.</p>
+<div class="diag">
+<div class="row"><div class="cb">&laquo;interface&raquo; TransactionManager</div></div>
+<div class="row"><div class="cb">&laquo;interface&raquo; PlatformTransactionManager<br><small>getTransaction, commit, rollback</small></div></div>
+<div class="row"><div class="cb">&laquo;abstract class&raquo; AbstractPlatformTransactionManager<br><small>default implementation of getTransaction, commit, rollback</small></div></div>
+<div class="row"><div class="cb sm">DataSource / JDBC<br>TransactionManager</div><div class="cb sm">Hibernate / JPA<br>TransactionManager</div><div class="cb sm">JTA<br>TransactionManager</div></div>
+</div>
+<ul>
+<li><b>JDBC</b> (<code>DataSourceTransactionManager</code>) for plain Java Database Connectivity.</li>
+<li><b>JPA</b> (<code>JpaTransactionManager</code>) for Java Persistence API / Hibernate.</li>
+<li><b>JTA</b> (<code>JtaTransactionManager</code>) for Java Transaction API: used to manage <b>distributed transactions</b> across several resources.</li>
+</ul>
+<p>Based on the underlying data source (JDBC, JPA ...), Spring Boot chooses the appropriate transaction manager for you.</p>
+
+<h2>Declarative vs programmatic</h2>
+<table>
+<tr><th>Declarative</th><th>Programmatic</th></tr>
+<tr><td>Transaction management through an <b>annotation</b> (<code>@Transactional</code>)</td><td>Transaction management through <b>code</b></td></tr>
+<tr><td>Simple, readable, the normal choice</td><td>Flexible (fine-grained boundaries) but harder to maintain</td></tr>
+</table>
+
+<h3>Declarative</h3>
+<pre><code class="java">@Component
+public class User {
+    @Transactional
+    public void updateUser() {
+        System.out.println("UPDATE QUERY TO update the user db values");
+    }
+}</code></pre>
+<p>If you define more than one data source, you create one transaction manager per data source and name the one you want:</p>
+<pre><code class="java">@Configuration
+public class AppConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource();
+        dataSource.setDriverClassName("org.h2.Driver");
+        dataSource.setUrl("jdbc:h2:mem:testdb");
+        dataSource.setUsername("sa");
+        dataSource.setPassword("");
+        return dataSource;
+    }
+
+    @Bean(name = "userTransactionManager")
+    public PlatformTransactionManager transactionManager(DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+}
+
+@Component
+public class UserDeclarative {
+    @Transactional(transactionManager = "userTransactionManager")
+    public void updateUser() {
+        System.out.println("Insert Query ran");
+        System.out.println("Update Query ran");
+    }
+}</code></pre>
+
+<h3>Programmatic: two ways</h3>
+<h4>Approach 1: PlatformTransactionManager directly</h4>
+<pre><code class="java">@Component
+public class UserDAO {
+    PlatformTransactionManager userTransactionManager;
+
+    UserDAO(PlatformTransactionManager userTransactionManager) {
+        this.userTransactionManager = userTransactionManager;
+    }
+
+    public void dbOperationWithRequiredPropagationUsingProgrammaticApproach1() {
+        DefaultTransactionDefinition transactionDefinition = new DefaultTransactionDefinition();
+        transactionDefinition.setName("Testing REQUIRED propagation");
+        transactionDefinition.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+
+        TransactionStatus status = userTransactionManager.getTransaction(transactionDefinition);
+        try {
+            // DB work: Propagation.REQUIRED, is transaction active: true
+            userTransactionManager.commit(status);
+        } catch (Exception e) {
+            userTransactionManager.rollback(status);
+        }
+    }
+}</code></pre>
+<h4>Approach 2: TransactionTemplate</h4>
+<p>Less boilerplate: the template does the begin/commit/rollback for you.</p>
+<pre><code class="java">TransactionTemplate template = new TransactionTemplate(userTransactionManager);
+template.setName("TRANSACTION TEMPLATE REQUIRED PROPAGATION");
+template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+
+template.execute(status -&gt; {
+    // DB work, runs inside a transaction; throw or status.setRollbackOnly() to roll back
+    return null;
+});</code></pre>
+<p>To inspect what is happening, use <code>TransactionSynchronizationManager.isActualTransactionActive()</code> and <code>getCurrentTransactionName()</code>. For a declarative method the name is the fully qualified method, like <code>...UserDeclarative.updateUser</code>; for a non-transactional caller it prints <code>false</code> and <code>null</code>.</p>
+
+<h2>Propagation</h2>
+<p>When a transaction method is called, Spring first checks the <b>propagation</b> value. It tells whether we must create a new transaction or reuse the caller's (the "parent" transaction).</p>
+<pre><code class="java">@Transactional(propagation = Propagation.REQUIRED)</code></pre>
+<table>
+<tr><th>Propagation</th><th>If a parent transaction exists</th><th>If there is none</th></tr>
+<tr><td><b>REQUIRED</b> (default)</td><td>Join it</td><td>Create a new one</td></tr>
+<tr><td><b>REQUIRES_NEW</b></td><td><b>Suspend</b> the parent, create a new transaction, run, finish it, then <b>resume</b> the parent</td><td>Create a new one</td></tr>
+<tr><td><b>SUPPORTS</b></td><td>Join it</td><td>Run <b>without</b> a transaction</td></tr>
+<tr><td><b>NOT_SUPPORTED</b></td><td>Suspend it and run without a transaction, then resume it</td><td>Run without a transaction</td></tr>
+<tr><td><b>MANDATORY</b></td><td>Join it</td><td><b>Throw an exception</b></td></tr>
+<tr><td><b>NEVER</b></td><td><b>Throw an exception</b></td><td>Run without a transaction</td></tr>
+<tr><td><b>NESTED</b></td><td>Create a <b>savepoint</b> inside the parent; a failure rolls back only to the savepoint</td><td>Behaves like REQUIRED</td></tr>
+</table>
+<div class="flow"><b>REQUIRED</b><i>parent present?</i><b>use it</b><i>else</i><b>create new</b></div>
+<div class="flow"><b>REQUIRES_NEW</b><i>suspend parent</i><b>new txn runs and finishes</b><i>resume parent</i><b>parent continues</b></div>
+
+<div class="box ex"><strong>Seeing REQUIRED in action</strong>
+<pre><code class="java">@Component
+public class User {
+    @Autowired UserDAO userDAOobj;
+
+    @Transactional
+    public void updateUser() {                                   // parent transaction
+        System.out.println("Is transaction active: " + TransactionSynchronizationManager.isActualTransactionActive());
+        System.out.println("Some initial DB operation");
+        userDAOobj.dbOperationWithRequiredPropagationUsingProgrammaticApproach1();   // joins the parent
+        System.out.println("Some final DB operation");
+    }
+
+    public void updateUserFromNonTransactionalMethod() {         // no parent
+        System.out.println("Is transaction active: " + TransactionSynchronizationManager.isActualTransactionActive());
+        userDAOobj.dbOperationWithRequiredPropagationUsingProgrammaticApproach1();   // creates its own
+    }
+}</code></pre>
+<p>From <code>updateUser()</code> the inner call prints the <b>same transaction name</b> as the outer method (it joined). From the non-transactional method it first prints <code>false / null</code>, and the inner call then creates a new transaction.</p></div>
+
+<div class="box extra"><strong>When to use which</strong>
+<ul>
+<li><b>REQUIRES_NEW</b>: work that must commit even if the caller later rolls back, such as an audit log or a failed-attempt record.</li>
+<li><b>NESTED</b>: try something risky, and roll back only that part (needs savepoint support in the driver, JDBC mainly).</li>
+<li><b>MANDATORY</b>: a method that must never be called outside a transaction (it enforces the rule).</li>
+<li><b>NOT_SUPPORTED / NEVER</b>: long-running reads or calls where you do not want to hold a transaction (and connection) open.</li>
+<li>Propagation is applied through the proxy, so it has the same self-invocation limitation as every other <code>@Transactional</code> setting.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>REQUIRED vs REQUIRES_NEW?</summary><p>REQUIRED joins the existing transaction (a rollback affects the whole group). REQUIRES_NEW suspends it and runs an independent one: it can commit or roll back on its own.</p></details>
+<details><summary>If an inner REQUIRED method throws and the outer catches it, does the outer commit?</summary><p>No. The shared transaction was already marked rollback-only, so the outer commit fails with <code>UnexpectedRollbackException</code>.</p></details>
+<details><summary>Declarative vs programmatic transactions: when programmatic?</summary><p>When you need a transaction boundary smaller than a method, or dynamic settings decided at runtime.</p></details>
+</div>

@@ -1,0 +1,114 @@
+<h1>Reflection</h1>
+<p class="kicker">Looking at classes, methods and fields while the program is running, and even changing them.</p>
+
+<h2>What is reflection?</h2>
+<p>Part of the <code>java.lang.reflect</code> package. It is used to <b>examine classes, methods, fields and interfaces at runtime</b>, and it is also possible to <b>change the behaviour</b> of the class. For example:</p>
+<ul>
+<li>What all methods are present in the class</li>
+<li>What all fields are present in the class</li>
+<li>What is the return type of a method</li>
+<li>What is the modifier of the class</li>
+<li>What all interfaces the class has implemented</li>
+<li>Change the value of its public and private fields</li>
+</ul>
+
+<h2>The <code>Class</code> class</h2>
+<p>To do reflection, we first need an object of the class <code>Class</code>. Its instance <b>represents classes during runtime</b>. The JVM creates <b>one <code>Class</code> object for each and every class</b> which is loaded during runtime. It holds <b>metadata</b> about that class: its methods, fields, constructors and so on.</p>
+<div class="flow"><b>Eagle.class<br><small>file</small></b><i>loaded by JVM</i><b>Class&lt;Eagle&gt;<br><small>object with metadata</small></b></div>
+
+<h3>Three ways to get a Class object</h3>
+<pre><code class="java">// assume we have: class Bird { }
+
+// (i) using forName() method
+Class birdClass = Class.forName("Bird");
+
+// (ii) using .class
+Class birdClass = Bird.class;
+
+// (iii) using getClass() method: first get the object
+Bird birdObj = new Bird();
+Class birdClass = birdObj.getClass();</code></pre>
+
+<h2>Reflection of classes</h2>
+<pre><code class="java">public class Eagle {
+    public String breed;
+    private boolean canSwim;
+    public void fly() { System.out.println("fly"); }
+    public void eat() { }
+}
+
+Class eagleClass = Eagle.class;
+eagleClass.getName();                                        // Eagle
+Modifier.toString(eagleClass.getModifiers());                // public</code></pre>
+
+<h2>Getting methods</h2>
+<table>
+<tr><th>Call</th><th>Returns</th></tr>
+<tr><td><code>getMethods()</code></td><td><b>all public</b> methods, including the ones inherited from <code>Object</code> (<code>wait()</code>, <code>notify()</code> ...)</td></tr>
+<tr><td><code>getDeclaredMethods()</code></td><td><b>all public and private</b> methods of <b>this class only</b>, not <code>Object</code>'s</td></tr>
+</table>
+<pre><code class="java">Method[] methods = eagleClass.getMethods();
+for (Method method : methods) {
+    method.getName();               // fly
+    method.getReturnType();         // void
+    method.getDeclaringClass();     // Eagle
+}
+
+Method[] methods = eagleClass.getDeclaredMethods();</code></pre>
+
+<h3>Invoking methods of a class</h3>
+<pre><code class="java">Class eagleClass = Class.forName("Eagle");
+Object eagleObject = eagleClass.getDeclaredConstructor().newInstance();   // it's an object
+
+Method flyMethod = eagleClass.getMethod("fly", int.class, String.class);
+//                                        name   comma separated parameter types
+
+flyMethod.invoke(eagleObject, 2, "Hello");     // will execute the fly method with int and String arguments</code></pre>
+<p><code>Class.newInstance()</code> is deprecated since Java 9, so use <code>getDeclaredConstructor().newInstance()</code> as above. For the example to run, the class must declare <code>fly(int, String)</code> with those parameter types.</p>
+
+<h2>Reflection of fields</h2>
+<pre><code class="java">Class eagleClass = Eagle.class;
+Field[] fields = eagleClass.getFields();            // public fields only
+// loop over and call field.getName(), field.getType() ...   → breed, String
+
+Field[] fields = eagleClass.getDeclaredFields();    // both public and private fields</code></pre>
+
+<h3>Setting the value of a public field</h3>
+<pre><code class="java">Class eagleClass = Eagle.class;
+Eagle eagleObj = new Eagle();
+Field field = eagleClass.getDeclaredField("breed");   // we extracted the field
+field.set(eagleObj, "BrownBreed");                    // which object, and what value to set
+System.out.println(eagleObj.breed);</code></pre>
+<p>The above throws an exception for a <b>private</b> field. To change a private field, just add one line:</p>
+<pre><code class="java">field.setAccessible(true);</code></pre>
+<p>That's a <b>disadvantage of reflection</b>: it <b>bypasses encapsulation</b>, since it lets you access private fields outside the class.</p>
+
+<h2>Reflection of constructors</h2>
+<p>Through this, reflection also <b>breaks the Singleton pattern</b>.</p>
+<pre><code class="java">public class Eagle {
+    private Eagle() { }          // private constructor
+}
+
+Class eagleClass = Eagle.class;
+Constructor[] eagleConsList = eagleClass.getDeclaredConstructors();   // loop over it
+
+for (Constructor eagleConstructor : eagleConsList) {
+    eagleConstructor.setAccessible(true);
+    Eagle eobj = (Eagle) eagleConstructor.newInstance();   // object instantiated, though the constructor is private
+}</code></pre>
+<div class="diag"><div class="row"><div class="cb">private Eagle()<br><small>"nobody can call me"</small></div></div><div class="row"><div class="cb wide">setAccessible(true) &rarr; newInstance()<br><small>a second singleton object appears</small></div></div></div>
+
+<h2>Why not use reflection?</h2>
+<ol>
+<li><b>Breaks encapsulation</b> and the singleton pattern.</li>
+<li>It's <b>slow</b>, because it happens at runtime.</li>
+</ol>
+<div class="box extra"><strong>Good to know</strong>
+<p>Reflection is what frameworks are built on. Spring finds your <code>@Component</code> classes, creates them and injects dependencies; Hibernate fills entity fields; Jackson maps JSON to fields; JUnit finds <code>@Test</code> methods. All through reflection. Also, since Java 9 the module system can block <code>setAccessible(true)</code> on JDK internals (<code>InaccessibleObjectException</code>).</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>getMethods() vs getDeclaredMethods()?</summary><p><code>getMethods()</code>: public methods, including inherited. <code>getDeclaredMethods()</code>: every method declared in this class (any access), but not inherited ones.</p></details>
+<details><summary>How can reflection break a singleton and how do you stop it?</summary><p>By calling the private constructor after <code>setAccessible(true)</code>. Stop it by throwing from the constructor if an instance exists, or use an enum singleton.</p></details>
+<details><summary>Where is reflection used in Spring Boot?</summary><p>Bean creation, dependency injection, annotation scanning, and proxies for AOP and <code>@Transactional</code>.</p></details>
+<details><summary>Three ways to get a Class object?</summary><p><code>Class.forName("pkg.Name")</code>, <code>Name.class</code>, <code>obj.getClass()</code>.</p></details>
+</div>

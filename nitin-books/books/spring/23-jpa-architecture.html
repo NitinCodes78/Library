@@ -1,0 +1,170 @@
+<h1>JPA Architecture (Part 2)</h1>
+<p class="kicker">What really happens behind a one-line save(): EntityManagerFactory, transaction manager, EntityManager, PersistenceContext and the entity lifecycle.</p>
+
+<h2>ORM: Object-Relational Mapping</h2>
+<ul>
+<li>It acts as a <b>bridge between Java objects and database tables</b>.</li>
+<li>Unlike JDBC, where we work with SQL, here we interact with the database <b>using Java objects</b>.</li>
+</ul>
+<div class="flow"><b>Application logic</b><i>JPA (interface)</i><b>Hibernate (implementation)</b><i>JDBC (interface)</i><b>DB driver (implementation)</b><i>SQL</i><b>Database</b></div>
+
+<h2>The happy flow first</h2>
+<pre><code>pom.xml
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-data-jpa&lt;/artifactId&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;   (H2 in-memory database)
+    &lt;groupId&gt;com.h2database&lt;/groupId&gt;
+    &lt;artifactId&gt;h2&lt;/artifactId&gt;
+    &lt;scope&gt;runtime&lt;/scope&gt;
+&lt;/dependency&gt;
+
+application.properties
+spring.datasource.url=jdbc:h2:mem:userDB
+spring.datasource.driver-class-name=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=</code></pre>
+<pre><code class="java">@Entity
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    private String email;
+    public UserDetails() { }
+    public UserDetails(String name, String email) { this.name = name; this.email = email; }
+    // getters and setters
+}
+
+@Repository
+public interface UserDetailsRepository extends JpaRepository&lt;UserDetails, Long&gt; { }
+
+@Service
+public class UserDetailsService {
+    @Autowired UserDetailsRepository userDetailsRepository;
+
+    public void saveUser(UserDetails user) { userDetailsRepository.save(user); }
+    public List&lt;UserDetails&gt; getAllUsers() { return userDetailsRepository.findAll(); }
+}
+
+@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+    @Autowired UserDetailsService userDetailsService;
+
+    @GetMapping(path = "/test-jpa")
+    public List&lt;UserDetails&gt; getUser() {
+        userDetailsService.saveUser(new UserDetails("xyz", "xyz@conceptandcoding.com"));
+        return userDetailsService.getAllUsers();
+    }
+}</code></pre>
+<p>The output is the saved user as JSON. To look into the in-memory database, enable the H2 console:</p>
+<pre><code>spring.h2.console.enabled=true
+spring.h2.console.path=/h2-console           # http://localhost:8080/h2-console</code></pre>
+<p>It looks very simple, but what is happening inside?</p>
+
+<h2>Components involved</h2>
+<div class="diag">
+<div class="row"><div class="cb">EntityManagerFactory<br><small>1 per persistence unit</small></div></div>
+<div class="row"><div class="cb sm">EntityManager 1<br><small>+ PersistenceContext 1</small></div><div class="cb sm">EntityManager 2<br><small>+ PersistenceContext 2</small></div><div class="cb sm">EntityManager N<br><small>+ PersistenceContext N</small></div></div>
+<div class="row"><div class="cb wide">JPQL, then Dialect, then SQL, then JDBC / Driver, then Database</div></div>
+</div>
+<p>The first three steps below happen <b>during application startup</b>; step 4 and 5 happen <b>when an API is invoked</b>.</p>
+
+<h3>1 and 2. EntityManagerFactory</h3>
+<ul>
+<li>Using the <b>persistence unit</b> configuration, the <code>EntityManagerFactory</code> object is created at application startup. If any property is not provided, a default is picked.</li>
+<li><b>One EntityManagerFactory per persistence unit.</b></li>
+<li>It acts as a <b>factory to create <code>EntityManager</code> objects</b>.</li>
+<li>Spring Boot builds it through <code>LocalContainerEntityManagerFactoryBean.createNativeEntityManagerFactory()</code>, which finds the <code>PersistenceProvider</code> (Hibernate) and calls <code>createContainerEntityManagerFactory(persistenceUnitInfo, properties)</code>.</li>
+</ul>
+<p>What if we want to create it manually?</p>
+<pre><code class="java">@Configuration
+public class AppConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        HikariDataSource dataSource = new HikariDataSource();
+        dataSource.setDriverClassName("org.h2.Driver");
+        dataSource.setJdbcUrl("jdbc:h2:mem:userDB");
+        dataSource.setUsername("sa");
+        dataSource.setPassword("");
+        return dataSource;
+    }
+
+    @Bean
+    public JpaVendorAdapter jpaVendorAdapter() {
+        HibernateJpaVendorAdapter adapter = new HibernateJpaVendorAdapter();
+        adapter.setGenerateDdl(true);
+        adapter.setDatabasePlatform("org.hibernate.dialect.H2Dialect");
+        return adapter;
+    }
+
+    @Bean
+    public LocalContainerEntityManagerFactoryBean entityManagerFactory(
+            DataSource dataSource, JpaVendorAdapter jpaVendorAdapter) {
+        LocalContainerEntityManagerFactoryBean emf1 = new LocalContainerEntityManagerFactoryBean();
+        emf1.setDataSource(dataSource);
+        emf1.setJpaVendorAdapter(jpaVendorAdapter);
+        emf1.setPackagesToScan("com.conceptandcoding.learningspringboot.jpa");
+        emf1.setPersistenceUnitName("uniqueFactoryName");     // unique name for our EntityManagerFactory
+        return emf1;
+    }
+}</code></pre>
+
+<h3>3. Transaction manager association</h3>
+<p>In the persistence unit we specify the <code>transaction-type</code>:</p>
+<ul>
+<li><b>RESOURCE_LOCAL</b> (default): a manager handling transactions for <b>one database</b> (Spring's <code>JpaTransactionManager</code>).</li>
+<li><b>JTA</b> (Java Transaction API): a manager handling a transaction that can <b>span multiple databases</b> (needs things like Atomikos, XADataSource and the two-phase commit protocol).</li>
+</ul>
+<p>After the <code>EntityManagerFactory</code> is created, the matching transaction manager is created. (JTA is a topic of its own and is out of scope here.)</p>
+
+<h3>4. EntityManager and PersistenceContext (at request time)</h3>
+<p><b>EntityManager</b>:</p>
+<ul>
+<li>An interface in JPA with the methods to perform CRUD on entities: <code>persist()</code> (save), <code>merge()</code> (update), <code>find()</code> (fetch), <code>remove()</code> (delete), <code>createQuery()</code> (run JPQL).</li>
+<li>The methods are implemented by the JPA vendor (Hibernate). <code>EntityManagerFactory</code> creates the object.</li>
+</ul>
+<p><b>PersistenceContext</b>:</p>
+<ul>
+<li>Think of it as a <b>first-level cache</b>.</li>
+<li>For each <code>EntityManager</code> a PersistenceContext is created, holding the list of entities it is working on, and it also <b>manages the lifecycle</b> of the entity.</li>
+</ul>
+<p>Insert / update / delete through the EntityManager are <b>transaction-bound</b>: it first checks that a transaction is open and throws an exception if not (<code>TransactionRequiredException</code>). Read operations are not transaction-bound. Add <code>@Transactional</code> and it works:</p>
+<pre><code class="java">@Service
+public class UserDetailsService {
+
+    @PersistenceContext
+    EntityManager entityManager;
+
+    @Transactional
+    public void saveUser(UserDetails user) {
+        entityManager.persist(user);
+    }
+}</code></pre>
+
+<h2>Entity lifecycle in the PersistenceContext</h2>
+<div class="diag">
+<div class="row"><div class="cb sm">New / Transient<br><small>new UserEntity()</small></div><div class="cb sm">Managed / Persistent<br><small>persist(), find(), query</small></div><div class="cb sm">Removed<br><small>remove(): delete from DB</small></div></div>
+<div class="row"><div class="cb wide">Detached &mdash; detach(entity), close(), clear() take it out of the context; merge(entity) brings it back to Managed</div></div>
+</div>
+<table>
+<tr><th>State</th><th>Meaning</th></tr>
+<tr><td><b>New (Transient)</b></td><td>Just created with <code>new</code>; the persistence context knows nothing about it.</td></tr>
+<tr><td><b>Managed (Persistent)</b></td><td>Tracked by the persistence context. Changes are detected and written to the DB at <b>flush</b> (usually commit): this is automatic "dirty checking".</td></tr>
+<tr><td><b>Removed</b></td><td>Scheduled for deletion; the row is deleted on flush.</td></tr>
+<tr><td><b>Detached</b></td><td>Was managed but the context is closed or cleared; changes are no longer tracked until <code>merge()</code>.</td></tr>
+</table>
+<ul>
+<li><code>persist()</code> makes a New entity Managed. <code>find()</code>/queries return Managed entities. <code>remove()</code> moves it to Removed.</li>
+<li><code>flush()</code> pushes pending changes to the database; <code>detach(entity)</code>, <code>close()</code> or <code>clear()</code> make entities Detached; <code>merge(entity)</code> returns a Managed copy of a detached one.</li>
+</ul>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>EntityManagerFactory vs EntityManager?</summary><p>The factory is heavy, thread-safe and one per persistence unit (created at startup). The EntityManager is lightweight and not thread-safe, created per unit of work, each with its own persistence context.</p></details>
+<details><summary>What is the persistence context?</summary><p>The first-level cache and change tracker of one EntityManager: it keeps one instance per entity id and detects modifications to flush.</p></details>
+<details><summary>Why must save/persist run inside a transaction?</summary><p>Writes are only flushed and made durable on commit; without an open transaction the EntityManager throws <code>TransactionRequiredException</code>.</p></details>
+<details><summary>persist() vs merge()?</summary><p>persist() makes a new entity managed (the same object). merge() copies the state of a detached/new object onto a managed one and returns that managed copy.</p></details>
+</div>

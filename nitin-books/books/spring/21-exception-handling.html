@@ -1,0 +1,170 @@
+<h1>Exception Handling</h1>
+<p class="kicker">What Spring Boot does when a controller throws, and how to take control: @ExceptionHandler, @ControllerAdvice, @ResponseStatus.</p>
+
+<h2>Who handles an exception?</h2>
+<p>When an exception escapes a controller, Spring MVC passes it through a chain of <b>exception resolvers</b>, held by <code>HandlerExceptionResolverComposite</code>:</p>
+<div class="flow"><b>Exception</b><i>try</i><b>ExceptionHandlerExceptionResolver</b><i>not handled?</i><b>ResponseStatusExceptionResolver</b><i>not handled?</i><b>DefaultHandlerExceptionResolver</b><i>still not handled?</i><b>DefaultErrorAttributes (BasicErrorController)</b></div>
+<p>Each resolver sets the right status and message for the exceptions it understands. If a resolver handled it, the chain stops there.</p>
+<table>
+<tr><th>Resolver</th><th>Handles</th></tr>
+<tr><td><code>ExceptionHandlerExceptionResolver</code></td><td><code>@ExceptionHandler</code> methods and <code>@ControllerAdvice</code></td></tr>
+<tr><td><code>ResponseStatusExceptionResolver</code></td><td>Uncaught exceptions annotated with <code>@ResponseStatus</code> (and <code>ResponseStatusException</code>)</td></tr>
+<tr><td><code>DefaultHandlerExceptionResolver</code></td><td>Spring framework's own exceptions only (method not supported, no resource found, type mismatch ...)</td></tr>
+</table>
+
+<h2>The default behaviour</h2>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+    @GetMapping(path = "/get-user")
+    public String getUser() {
+        throw new NullPointerException("throwing null pointer exception for testing");
+    }
+}</code></pre>
+<p>The response is a generic JSON with <code>timestamp</code>, <code>status</code> (500), <code>error</code> ("Internal Server Error") and <code>path</code> (<code>/api/get-user</code>), but <b>no custom message</b>.</p>
+<p>Now a custom exception that carries a status and a message:</p>
+<pre><code class="java">public class CustomException extends RuntimeException {
+    HttpStatus status;
+    String message;
+
+    CustomException(HttpStatus status, String message) {
+        this.status = status;
+        this.message = message;
+    }
+    public HttpStatus getStatus() { return status; }
+    @Override public String getMessage() { return message; }
+}
+
+@GetMapping(path = "/get-user")
+public String getUser() {
+    throw new CustomException(HttpStatus.BAD_REQUEST, "request is not correct, UserID is missing");
+}</code></pre>
+<p>The output is <b>again the same generic 500</b>. Why is our <code>BAD_REQUEST</code> (400) and our message not shown?</p>
+<ul>
+<li>We are not creating a <code>ResponseEntity</code>; we are just throwing, so <b>some other class</b> builds the response.</li>
+<li>The exception passes through the three resolvers in sequence. <code>NullPointerException</code> and <code>CustomException</code> are not understood by any of them, so no status or message is set.</li>
+<li>When control reaches <b><code>DefaultErrorAttributes</code></b> (used by the <code>BasicErrorController</code> behind <code>/error</code>), it fills the response with <b>default values</b>: timestamp, status, error, path, and (depending on configuration) message.</li>
+</ul>
+<pre><code class="java">// DefaultErrorAttributes (simplified)
+errorAttributes.put("timestamp", new Date());
+addStatus(errorAttributes, webRequest);
+addErrorDetails(errorAttributes, webRequest, includeStackTrace);
+addPath(errorAttributes, webRequest);</code></pre>
+<p>If we want <b>full control</b> and do not want to depend on the resolvers' defaults, we have to build the <code>ResponseEntity</code> ourselves. The next sections show how.</p>
+
+<h2>1. ExceptionHandlerExceptionResolver: @ExceptionHandler and @ControllerAdvice</h2>
+<h3>Controller-level handling</h3>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+
+    @GetMapping(path = "/get-user")
+    public ResponseEntity&lt;?&gt; getUser() {
+        throw new CustomException(HttpStatus.BAD_REQUEST, "UserID is missing");
+    }
+
+    @ExceptionHandler(CustomException.class)
+    public ResponseEntity&lt;String&gt; handleCustomException(CustomException ex) {
+        return new ResponseEntity&lt;&gt;(ex.getMessage(), ex.getStatus());
+    }
+}
+// 400 Bad Request, body: UserID is missing</code></pre>
+<h3>Returning an error object</h3>
+<pre><code class="java">public class ErrorResponse {
+    private Date timestamp;
+    private String msg;
+    private int status;
+    // constructor + getters
+}
+
+@ExceptionHandler(CustomException.class)
+public ResponseEntity&lt;Object&gt; handleCustomException(CustomException ex) {
+    ErrorResponse errorResponse = new ErrorResponse(new Date(), ex.getMessage(), ex.getStatus().value());
+    return new ResponseEntity&lt;&gt;(errorResponse, ex.getStatus());
+}
+// {"timestamp": "...", "msg": "UserID is missing", "status": 400}</code></pre>
+<h3>Several handlers in one controller</h3>
+<pre><code class="java">@ExceptionHandler(CustomException.class)
+public ResponseEntity&lt;String&gt; handleCustom(CustomException ex) {
+    return new ResponseEntity&lt;&gt;(ex.getMessage(), ex.getStatus());
+}
+
+@ExceptionHandler(IllegalArgumentException.class)
+public ResponseEntity&lt;String&gt; handleIllegal(IllegalArgumentException ex) {
+    return new ResponseEntity&lt;&gt;(ex.getMessage(), HttpStatus.BAD_REQUEST);
+}</code></pre>
+<h3>One handler for several exceptions</h3>
+<pre><code class="java">@ExceptionHandler({CustomException.class, IllegalArgumentException.class})
+public ResponseEntity&lt;String&gt; handle(Exception ex) {
+    return new ResponseEntity&lt;&gt;(ex.getMessage(), HttpStatus.BAD_REQUEST);
+}</code></pre>
+<h3>A handler that does not return a ResponseEntity</h3>
+<p>If the handler does not build the response, <code>DefaultErrorAttributes</code> creates it. By default Spring Boot <b>hides the <code>message</code> field</b> from this default body; show it with:</p>
+<pre><code>server.error.include-message=always</code></pre>
+
+<h3>Global handling with @ControllerAdvice</h3>
+<p>Controller-level <code>@ExceptionHandler</code> has a problem: if several controllers can throw the same exception, the same handler gets copied into each of them, which is <b>code duplication</b>. <code>@ControllerAdvice</code> (or <code>@RestControllerAdvice</code>) moves it to one place for all controllers.</p>
+<pre><code class="java">@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(CustomException.class)
+    public ResponseEntity&lt;String&gt; handleCustomException(CustomException ex) {
+        return new ResponseEntity&lt;&gt;(ex.getMessage(), ex.getStatus());
+    }
+}</code></pre>
+<div class="box extra"><strong>Priority rules</strong>
+<ul>
+<li><b>Controller-level vs global:</b> if both define a handler for the exception, the <b>controller-level</b> one wins (the response shows e.g. "UserID is missing: from Controller ExceptionHandler" rather than the global text).</li>
+<li><b>Two handlers that can handle the same exception:</b> Spring picks the <b>closest match</b> in the class hierarchy: first an exact match, then its parent, and so on up the tree. A <code>CustomException</code> handler beats a <code>RuntimeException</code> handler for a <code>CustomException</code>.</li>
+</ul></div>
+<pre><code class="java">@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(CustomException.class)                 // chosen for CustomException
+    public ResponseEntity&lt;String&gt; custom(CustomException ex) { ... }
+
+    @ExceptionHandler(RuntimeException.class)                // chosen for every other RuntimeException
+    public ResponseEntity&lt;String&gt; runtime(RuntimeException ex) {
+        return new ResponseEntity&lt;&gt;(ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+}</code></pre>
+
+<h2>2. ResponseStatusExceptionResolver: @ResponseStatus</h2>
+<p>Handles <b>uncaught</b> exceptions annotated with <code>@ResponseStatus</code>.</p>
+<h3>Use case 1: on the exception class</h3>
+<pre><code class="java">@ResponseStatus(HttpStatus.BAD_REQUEST)
+public class CustomException extends RuntimeException {
+    CustomException(String message) { super(message); }
+}
+
+@GetMapping(path = "/get-user")
+public ResponseEntity&lt;?&gt; getUser() {
+    throw new CustomException("UserID is missing");
+}
+// 400 Bad Request: {"timestamp": ..., "status": 400, "error": "Bad Request", "path": "/api/get-user"}</code></pre>
+<p>You can also give a reason: <code>@ResponseStatus(value = HttpStatus.BAD_REQUEST, reason = "Invalid Request Passed")</code>; that text appears as the message.</p>
+<h3>Use case 2: on an @ExceptionHandler method</h3>
+<p>The <code>ResponseStatusExceptionResolver</code> handles <b>uncaught</b> exceptions. When <code>@ResponseStatus</code> sits on an <code>@ExceptionHandler</code> method, the exception is handled by Spring's request handling mechanism itself, not by this resolver.</p>
+<p>It gets confusing when the handler also sets the status itself. For example, the handler calls <code>response.sendError(403, ...)</code> and also has <code>@ResponseStatus(400)</code>: <code>sendError</code> has already set the status and message, and the <code>@ResponseStatus</code> handling then tries to set them again, which fails on an <b>already committed</b> response (an <code>IOException</code> inside the resolver).</p>
+<p>So it is advisable <b>not to use <code>@ExceptionHandler</code> and <code>@ResponseStatus</code> together</b>. If you must, let the handler return nothing and let the annotation decide:</p>
+<pre><code class="java">@ExceptionHandler(CustomException.class)
+@ResponseStatus(value = HttpStatus.BAD_REQUEST, reason = "Invalid Request Sent")
+public void handle(CustomException e) { }</code></pre>
+
+<h2>3. DefaultHandlerExceptionResolver</h2>
+<p>Handles <b>Spring framework related exceptions only</b>, for example HTTP method not supported (405), no handler/resource found (404), missing request parameter or type mismatch (400), unsupported media type (415).</p>
+
+<div class="box extra"><strong>A modern pattern</strong>
+<ul>
+<li>Spring 6 / Boot 3 supports RFC 7807 <b><code>ProblemDetail</code></b>: return <code>ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "UserID is missing")</code> from a handler for a standard error body (enable defaults with <code>spring.mvc.problemdetails.enabled=true</code>).</li>
+<li>Bean validation failures (<code>@Valid</code> on <code>@RequestBody</code>) raise <code>MethodArgumentNotValidException</code>; handle it in your <code>@RestControllerAdvice</code> and return the field errors with a 400.</li>
+<li>Throw <code>ResponseStatusException(HttpStatus.NOT_FOUND, "user not found")</code> for a quick, one-off error without writing a class.</li>
+<li>Never expose stack traces to clients (<code>server.error.include-stacktrace=never</code>).</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>How do you handle exceptions globally in Spring Boot?</summary><p><code>@RestControllerAdvice</code> with <code>@ExceptionHandler</code> methods returning a consistent error body.</p></details>
+<details><summary>@ControllerAdvice vs @RestControllerAdvice?</summary><p>The latter adds <code>@ResponseBody</code>, so handler return values go to the body as JSON.</p></details>
+<details><summary>If a controller and an advice both handle the exception, which wins?</summary><p>The controller-local handler.</p></details>
+<details><summary>Which resolvers does Spring use, and in what order?</summary><p>ExceptionHandlerExceptionResolver, ResponseStatusExceptionResolver, DefaultHandlerExceptionResolver; whatever remains falls to Boot's <code>/error</code> endpoint.</p></details>
+</div>

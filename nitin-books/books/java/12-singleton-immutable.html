@@ -1,0 +1,140 @@
+<h1>Singleton and Immutable Classes</h1>
+<p class="kicker">Exactly one object, and objects that never change. Both are very common interview questions.</p>
+
+<h2>Singleton class</h2>
+<p>The objective of this class is to <b>create only one and only one object</b>. There are different ways.</p>
+<p>Throughout, we use a <code>DBConnection</code> class. The <b>constructor is private</b> so no one can create an object with <code>new</code>.</p>
+
+<h3>1. Eager initialization</h3>
+<pre><code class="java">public class DBConnection {
+    private static DBConnection conObject = new DBConnection();  // belongs to the class, but is private
+
+    private DBConnection() { }          // private constructor: can't initialize an object from outside
+
+    public static DBConnection getInstance() {
+        return conObject;
+    }
+}
+
+// call this to get conObject (one and only object)
+DBConnection conObject = DBConnection.getInstance();</code></pre>
+
+<p><b>Problem:</b> even if we never use it, the object is created in memory at class-loading time.</p>
+
+<h3>2. Lazy initialization</h3>
+<pre><code class="java">public class DBConnection {
+    private static DBConnection conObject;      // not initialized here
+    private DBConnection() { }
+
+    public static DBConnection getInstance() {
+        if (conObject == null) {
+            conObject = new DBConnection();
+        }
+        return conObject;
+    }
+}</code></pre>
+<p><b>Problem:</b> if two threads come in parallel when it's null, <b>two objects will be created</b>.</p>
+
+<h3>3. Synchronized method</h3>
+<pre><code class="java">public static synchronized DBConnection getInstance() {   // lock and unlock
+    if (conObject == null) {
+        conObject = new DBConnection();
+    }
+    return conObject;
+}</code></pre>
+<p>If T1 is accessing, then a lock is created and the others wait.</p>
+<p><b>Problem:</b> slow. Say 100 parallel requests: because we put <code>synchronized</code> at method level, every call takes the lock, even long after the object exists.</p>
+
+<h3>4. Double-check locking</h3>
+<pre><code class="java">public class DatabaseConnection {
+    private static volatile DatabaseConnection conObject;
+    private DatabaseConnection() { }
+
+    public static DatabaseConnection getInstance() {
+        if (conObject == null) {                              // check 1
+            synchronized (DatabaseConnection.class) {
+                if (conObject == null) {                      // check 2
+                    conObject = new DatabaseConnection();
+                }
+            }
+        }
+        return conObject;
+    }
+}</code></pre>
+<p>Thread 1 comes and takes the lock. For other threads, the object is already created and they will simply return it, without waiting on the lock.</p>
+
+<h4>Why <code>volatile</code>?</h4>
+<p>Creating an object has 3 steps: <b>allocate memory</b>, <b>initialize the fields</b>, and <b>assign the memory address</b> to <code>conObject</code>. Each CPU core has its own private cache (L1), and there is a shared memory below (L3 cache / RAM).</p>
+<div class="diag"><div class="row"><div class="cb">Core 1<br><small>runs T1</small></div><div class="cb">Core 2<br><small>runs T2</small></div></div>
+<div class="row"><div class="cb sm">L1 cache<br><small>private</small></div><div class="cb sm">L1 cache<br><small>private</small></div></div>
+<div class="row"><div class="cb wide">Shared memory (L3 / RAM)</div></div></div>
+<p>Say T1 initialises the object in Core 1's L1 cache. Now T2 runs on Core 2, and the memory between Core 1 and Core 2 isn't synced yet, so T2 can see a <b>stale or half-built</b> <code>conObject</code>. That causes the issue.</p>
+<p><b>volatile</b> guarantees two things: <b>visibility</b> (a write by one thread is seen by the next read in any thread) and <b>no reordering</b> (the compiler and CPU may not shuffle the three object-creation steps, so another thread can never see the reference before the fields are initialised). That is the real bug it prevents. A handy mental model is "volatile pushes the value out to shared memory instead of keeping it in one core's cache".</p>
+
+<p><b>Problem with double-check:</b> <code>volatile</code> is slower and so is <code>synchronized</code>, so we pay a cost on top.</p>
+
+<h3>5. Bill Pugh singleton</h3>
+<p>No <code>volatile</code>, no <code>synchronized</code>. It is based on <b>eager-style loading</b>, but it solves its disadvantage.</p>
+<pre><code class="java">public class DatabaseConnection {
+    private DatabaseConnection() { }
+
+    private static class DBConnectionHelper {      // nested class
+        private static final DatabaseConnection INSTANCE_OBJECT = new DatabaseConnection();
+    }
+
+    public static DatabaseConnection getInstance() {
+        return DBConnectionHelper.INSTANCE_OBJECT;
+    }
+}</code></pre>
+<p>The nested class <b>isn't loaded at the time of application startup</b>, unless it is called. The JVM itself guarantees class loading is thread-safe, so the instance is created once, lazily, with no locks.</p>
+
+<h3>6. Enum</h3>
+<pre><code class="java">enum DBConnection {
+    INSTANCE;
+}</code></pre>
+<p>Enums have a private constructor by default and are <b>singleton by default</b>: only one instance is created, by the JVM.</p>
+<div class="box extra"><strong>Good to know</strong>
+<p>Enum is the safest way. Every other approach can be broken by <b>reflection</b> (calling the private constructor) or by <b>serialization</b> (deserializing creates a new object). Enums resist both. That is why Joshua Bloch recommends it in <i>Effective Java</i>.</p></div>
+
+<table>
+<tr><th>Approach</th><th>Lazy?</th><th>Thread-safe?</th><th>Note</th></tr>
+<tr><td>Eager</td><td>No</td><td>Yes</td><td>wastes memory if unused</td></tr>
+<tr><td>Lazy</td><td>Yes</td><td>No</td><td>two threads can create two objects</td></tr>
+<tr><td>Synchronized method</td><td>Yes</td><td>Yes</td><td>slow, locks on every call</td></tr>
+<tr><td>Double-check + volatile</td><td>Yes</td><td>Yes</td><td>fast after first call</td></tr>
+<tr><td>Bill Pugh</td><td>Yes</td><td>Yes</td><td>no locks at all</td></tr>
+<tr><td>Enum</td><td>Yes</td><td>Yes</td><td>also safe from reflection and serialization</td></tr>
+</table>
+
+<h2>Immutable class</h2>
+<p>We cannot change the value of an object once it's created. Examples: <code>String</code>, wrapper classes.</p>
+<ol>
+<li>Declare the class <b><code>final</code></b> so that it cannot be extended.</li>
+<li>All class members should be <b>private</b> (and final), so direct access can be avoided.</li>
+<li>Members are initialized <b>only once, using the constructor</b>.</li>
+<li><b>No setter methods</b>, just getters (which return a <b>copy</b> of mutable members).</li>
+</ol>
+<pre><code class="java">public final class MyImmutableClass {
+    private final String name;
+    private final List&lt;Object&gt; petNameList;
+
+    MyImmutableClass(String name, List&lt;Object&gt; petNameList) {
+        this.name = name;                          // values are set only during initialization
+        this.petNameList = new ArrayList&lt;&gt;(petNameList);   // defensive copy of what the caller gave us
+    }
+
+    public String getName() { return name; }       // no setter method
+
+    public List&lt;Object&gt; getPetNameList() {
+        return new ArrayList&lt;&gt;(petNameList);       // return copy, not the original one
+    }
+}</code></pre>
+<p>If we returned <code>petNameList</code> directly, we know it works by <b>reference</b>, so the caller could modify the original list. That's why we just return its copy. The same leak exists on the way <b>in</b>: if the constructor stored the caller's list reference, the caller could still change it afterwards, so we also make a <b>defensive copy in the constructor</b> (on Java 10+ you can use <code>List.copyOf(petNameList)</code>).</p>
+
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>How do you break a singleton, and how do you prevent it?</summary><p>Reflection, serialization, cloning and multiple class loaders. Throw an exception in the constructor if an instance exists, implement <code>readResolve()</code>, or simply use an enum.</p></details>
+<details><summary>Why is the second null check needed in double-check locking?</summary><p>Two threads can both pass check 1 and queue at the lock. Without check 2 the second would create another object once it gets the lock.</p></details>
+<details><summary>Why is String immutable?</summary><p>String pool sharing, thread-safety, safe hash keys (hashCode cached) and security (e.g. file paths, URLs, DB credentials can't be altered after validation).</p></details>
+<details><summary>Is Spring's singleton scope the same thing?</summary><p>No. A Spring singleton bean is one instance <b>per container</b>, not one per JVM, and the class itself can still be instantiated elsewhere.</p></details>
+</div>

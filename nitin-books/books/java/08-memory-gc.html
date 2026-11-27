@@ -1,0 +1,156 @@
+<h1>Memory Management and Garbage Collection</h1>
+<p class="kicker">Where your variables and objects live, how Java cleans up after you, and how the garbage collector decides.</p>
+
+<h2>Two types of memory</h2>
+<p>Both are <b>created by the JVM and stored in RAM</b>.</p>
+<div class="cols2">
+<div class="card stackc"><h4>Stack</h4><p>Temporary variables, primitives, and references. One per thread.</p></div>
+<div class="card heapc"><h4>Heap</h4><p>Objects. Shared by all threads. Cleaned by the garbage collector.</p></div>
+</div>
+
+<h2>Stack memory</h2>
+<ol>
+<li>Stores <b>temporary variables</b>, with a <b>separate memory block for methods</b> (scope is that block only).</li>
+<li>Stores <b>primitive data types</b>.</li>
+<li>Stores the <b>references</b> of heap objects. A reference can be <b>strong</b>, <b>weak</b> or <b>soft</b>.</li>
+<li><b>Each thread has its own stack</b> memory, but they all <b>share a common heap</b> memory.</li>
+<li>Variables within a scope are visible only there. As soon as a variable goes out of scope, it is <b>deleted from the stack in LIFO order</b>.</li>
+<li>When stack memory goes full, it throws <code>java.lang.StackOverflowError</code>.</li>
+</ol>
+<div class="mem3">
+<div class="col"><h5>Stack (Thread 1)</h5><div class="cell">int a = 10</div><div class="cell ref">reference obj</div><small>T2, T3 have their own stacks</small></div>
+<div class="arrow">→</div>
+<div class="col heapcol"><h5>Heap (shared)</h5><div class="cell">the object</div></div>
+</div>
+
+<h2>Walking through an example</h2>
+<pre><code class="java">public class MemoryManagement {
+    public static void main(String[] args) {
+        int primitiveVariable = 10;
+        Person personObj = new Person();
+        String stringLiteral = "24";
+        MemoryManagement memObj = new MemoryManagement();
+        memObj.memoryManagementTest(personObj);
+    }
+
+    private void memoryManagementTest(Person personObj) {
+        Person personObj2 = personObj;
+        String stringLiteral2 = "24";
+        String stringLiteral3 = new String("24");
+    }
+}</code></pre>
+<p><b>While <code>memoryManagementTest</code> is running</b>, the stack has two scopes, one on top of the other:</p>
+<div class="mem3">
+<div class="col"><h5>Stack</h5>
+<div class="cell top">memoryManagementTest scope<br><small>stringLiteral3 · stringLiteral2 · personObj2 · personObj</small></div>
+<div class="cell">main() scope<br><small>memObj · stringLiteral · personObj · primitiveVariable = 10</small></div></div>
+<div class="arrow">→</div>
+<div class="col heapcol"><h5>Heap</h5>
+<div class="cell">PersonObject</div><div class="cell">MemoryManagement object</div>
+<div class="cell pool">String Pool: <b>"24"</b></div>
+<div class="cell">String "24"<br><small>not in the pool: created with <b>new</b></small></div></div>
+</div>
+<ul>
+<li><code>stringLiteral</code> and <code>stringLiteral2</code> both point to the <b>same <code>"24"</code> in the pool</b>.</li>
+<li><code>stringLiteral3</code> points to a <b>separate object</b> in the heap, because it was created using <code>new</code>.</li>
+<li><code>personObj</code> and <code>personObj2</code> point to the <b>same PersonObject</b>.</li>
+</ul>
+<p><b>Now the closing bracket of <code>memoryManagementTest</code> is reached.</b> Its scope is deleted from the stack memory, <b>before main()</b>, in LIFO order. Its references are removed too. Similarly, when <code>main()</code> closes, its scope and references are removed and the <b>stack becomes empty</b>.</p>
+<p>But the <b>heap still has</b> the objects (PersonObject, MemoryManagement, the pool's "24", the new String "24"). They are now unreferenced, so the garbage collector can remove them later.</p>
+
+<h2>What really sits where</h2>
+<pre><code class="java">MyObject obj = new MyObject();</code></pre>
+<div class="cols2">
+<div class="card stackc"><h4><code>MyObject obj</code> (on the stack)</h4><ul><li>Does <b>not hold object data</b></li><li>Just a <b>memory address</b> (e.g. FA32) that points to the heap</li><li>Space used is very small, in bytes</li></ul></div>
+<div class="card heapc"><h4><code>new MyObject()</code> (the actual object)</h4><ul><li><b>Allocates memory on the heap</b></li><li>Space = the <b>object header</b> size + all its internal variables' size</li><li>The header is <b>metadata</b> used by Java for locking, garbage collection, etc.</li></ul></div>
+</div>
+<pre><code class="java">class MyObject {
+    int a;
+    String b;
+}</code></pre>
+<p><code>a</code> lives in the heap, <b>inside the object's memory block</b>. <code>b</code> also lives in the heap: it stores an address inside the object and <b>points to another heap location</b> (where the String is).</p>
+
+<h2>Heap memory</h2>
+<ol>
+<li>There is <b>no order</b> of allocating memory.</li>
+<li>The <b>garbage collector (GC)</b> is used to <b>delete the unreferenced objects</b> from memory. It <b>runs periodically and the JVM controls it</b>.</li>
+<li><code>System.gc()</code> can run it manually in code, but there is <b>still no guarantee</b>, as the JVM decides whether to remove unreferenced objects.</li>
+<li>If the JVM feels heap memory is filling fast, it invokes the GC <b>more often</b>; else it may run very rarely.</li>
+</ol>
+
+<h2>Types of references to heap objects</h2>
+<table>
+<tr><th>Type</th><th>Code</th><th>What GC does</th></tr>
+<tr><td><b>Strong</b></td><td><code>Person obj = new Person();</code></td><td>Never removes the object while the reference exists</td></tr>
+<tr><td><b>Weak</b></td><td><code>WeakReference&lt;Person&gt; weakPerson = new WeakReference&lt;&gt;(new Person());</code></td><td>Whenever GC runs, the object is removed and <code>weakPerson.get()</code> then returns <code>null</code></td></tr>
+<tr><td><b>Soft</b> (stronger than weak)</td><td><code>SoftReference&lt;Person&gt;</code></td><td>Removes the object <b>only if memory is urgently needed</b>, even though it is still referenced</td></tr>
+</table>
+<p>With a strong reference (<code>personObj</code>) the object <b>won't be removed on GC as there is still a reference</b>. The weak one goes at the next GC.</p>
+<p>Strength order: <b>strong &gt; soft &gt; weak &gt; phantom</b>. Weak dies at the next GC, soft survives until memory is tight, which suits caches.</p>
+
+<h2>Heap structure</h2>
+<div class="gen">
+<div class="young"><h5>Young generation</h5><div class="eden">Eden</div><div class="s">S0</div><div class="s">S1</div><small>S0 + S1 = survivor spaces</small></div>
+<div class="old"><h5>Old generation</h5></div>
+<div class="meta"><h5>Non-heap: Metaspace</h5><small>(replaced PermGen in Java 8)</small></div>
+</div>
+<p><b>Metaspace</b> (non-heap) replaced the old permanent generation (PermGen) in Java 8. It holds <b>class metadata</b> (class structures, method data) and constants like <code>static final</code>. Static variables themselves are stored <b>in the heap</b>, along with the class's <code>Class</code> object.</p>
+<p>The heap <b>also contains the String pool</b>, and heap memory is <b>shared with all the threads</b>. When heap memory goes full, it throws <code>java.lang.OutOfMemoryError</code>.</p>
+
+
+<h2>How garbage collection works, step by step</h2>
+<h3>Step 1: new objects go to Eden</h3>
+<p>Initially there are 5 objects, O1 to O5, just created. They all go into <b>Eden</b>.</p>
+<div class="gen mini"><div class="eden">Eden: O1 O2 O3 O4 O5</div><div class="s">S0: –</div><div class="s">S1: –</div><div class="oldb">Old: –</div></div>
+
+<h3>Step 2: first GC (minor GC)</h3>
+<p>The garbage collector invokes for the first time and uses the <b>Mark &amp; Sweep</b> algorithm:</p>
+<ul>
+<li><b>Mark:</b> finds out which objects are no longer referenced and need to be deleted.</li>
+<li><b>Sweep:</b> deletes those; objects still referenced and which survived go into <b>S0 or S1</b>.</li>
+</ul>
+<p>Suppose O2 and O5 are unreferenced and are deleted. The others are swept to whichever survivor space is available, and O6 and O7 are newly created and come in Eden. O1, O3, O4 now have <b>age = 1</b> (survived one GC).</p>
+<div class="gen mini"><div class="eden">Eden: O6 O7</div><div class="s on">S0: O1 O3 O4 (age 1)</div><div class="s">S1: –</div><div class="oldb">Old: –</div></div>
+<p>This is a <b>minor GC</b>: it performs GC in the <b>young generation</b> and happens <b>more often</b> than a major GC (which happens in the old generation).</p>
+
+<h3>Step 3: second GC</h3>
+<p>Suppose O7 and O4 now have no reference. The sweep happens. S0 gets emptied and <b>S1 is free</b>, so the survivors move there with their age increased.</p>
+<div class="gen mini"><div class="eden">Eden: –</div><div class="s">S0: –</div><div class="s on">S1: O6 (age 1), O1 (age 2), O3 (age 2)</div><div class="oldb">Old: –</div></div>
+
+<h3>Step 4: promotion to the old generation</h3>
+<p>Suppose the <b>threshold age is 3</b>: after that, objects are promoted to the old generation. Suppose O3 is now unreferenced. O1 hits age = 3 (third GC), so it moves to the <b>old generation</b>.</p>
+<div class="gen mini"><div class="eden">Eden: –</div><div class="s on">S0: O6 (age 2)</div><div class="s">S1: –</div><div class="oldb on">Old: O1</div></div>
+<p>Cleaning the old generation is a <b>major GC</b>. It happens <b>less frequently</b> than minor GC. Here also: mark the unreferenced ones, sweep (delete) them.</p>
+
+<h2>Algorithm 2: Mark &amp; Sweep with Compaction</h2>
+<p>Plain sweep leaves holes. Suppose O2 and O4 are unreferenced:</p>
+<div class="cmp"><div><small>Instead of leaving gaps</small><div class="blocks"><span>O1</span><span class="gap">free</span><span>O3</span><span class="gap">free</span><span>O5</span></div></div>
+<div><small>compact the memory</small><div class="blocks"><span>O1</span><span>O3</span><span>O5</span><span class="gap wide">free space together</span></div></div></div>
+
+<h2>Versions of GC</h2>
+<table>
+<tr><th>GC</th><th>Notes</th></tr>
+<tr><td><b>1. Serial GC</b></td><td>Only <b>one thread</b>. Slow. GC is very expensive, and <b>all application threads are paused</b>.</td></tr>
+<tr><td><b>2. Parallel GC</b></td><td><b>Default in Java 8.</b></td></tr>
+<tr><td><b>3. Concurrent Mark &amp; Sweep (CMS)</b></td><td>Better than Parallel GC. <b>No memory compaction.</b> Runs mark &amp; sweep <b>in parallel to application threads</b>: more efficient, but doesn't guarantee 100% efficiency.</td></tr>
+<tr><td><b>4. G1 GC</b></td><td>Better than CMS. <b>Compaction occurs</b> and it is more efficient: application threads work better, <b>pause time reduced</b>.</td></tr>
+</table>
+<p><b>Application thread pause time</b> is the time the application stops while GC runs. Order from most pause to least: <b>Serial &gt; Parallel &gt; CMS &gt; G1</b> (still, zero pause time is not guaranteed).</p>
+<p>A very rough, theoretical example of throughput: 500 APIs/min, 700 APIs/min, 900 APIs/min, 1300 APIs/min going from Serial up to G1.</p>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><b>G1 became the default GC in Java 9</b>. Parallel was the default in Java 8.</li>
+<li>CMS was deprecated in Java 9 and <b>removed in Java 14</b>.</li>
+<li>Newer low-pause collectors exist: <b>ZGC</b> and <b>Shenandoah</b> (pause times in milliseconds even on huge heaps).</li>
+<li>Useful flags: <code>-Xms</code> and <code>-Xmx</code> set initial and maximum heap, <code>-Xss</code> sets thread stack size.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Stack vs heap?</summary><p>Stack: per thread, holds method frames, primitives and references, automatic LIFO cleanup, small and fast; overflows with <code>StackOverflowError</code>. Heap: shared, holds objects, cleaned by GC; fills up with <code>OutOfMemoryError</code>.</p></details>
+<details><summary>When is an object eligible for garbage collection?</summary><p>When it is no longer reachable through any strong reference from a running thread (for example, all references went out of scope or were set to null).</p></details>
+<details><summary>Does System.gc() force garbage collection?</summary><p>No, it is only a request. The JVM decides.</p></details>
+<details><summary>Minor GC vs major GC?</summary><p>Minor GC cleans the young generation (frequent, fast). Major GC cleans the old generation (less frequent, slower).</p></details>
+<details><summary>Why are there two survivor spaces?</summary><p>At every minor GC the live objects are copied from Eden and the current survivor space into the empty one, which also compacts them. Then the roles swap.</p></details>
+<details><summary>What causes a StackOverflowError?</summary><p>Usually infinite or very deep recursion filling the thread's stack.</p></details>
+<details><summary>Strong vs weak vs soft references?</summary><p>Strong is never collected while referenced. Soft is collected only when memory is low. Weak is collected at the next GC. Use WeakHashMap or soft references for caches.</p></details>
+</div>

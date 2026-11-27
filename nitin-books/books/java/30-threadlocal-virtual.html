@@ -1,0 +1,94 @@
+<h1>ThreadLocal and Virtual Threads</h1>
+<p class="kicker">Per-thread data, and Java's lightweight threads (JDK 21).</p>
+
+<h2>ThreadLocal</h2>
+<ol>
+<li>The <code>ThreadLocal</code> class provides access to <b>thread-local variables</b>.</li>
+<li>This thread-local variable holds the value for a <b>particular thread</b>.</li>
+<li>That means each thread has <b>its own copy</b> of the thread-local variable.</li>
+<li>We need only <b>1 object</b> of the ThreadLocal class, and each thread can use it to set and get its own thread variable.</li>
+</ol>
+<pre><code class="java">ThreadLocal&lt;String&gt; threadLocalObj = new ThreadLocal&lt;&gt;();
+
+// main thread is currently executing
+threadLocalObj.set(Thread.currentThread().getName());     // main thread's variable is set to its name
+
+Thread thread1 = new Thread(() -&gt; {
+    threadLocalObj.set(Thread.currentThread().getName());   // same object, but sets the variable of thread1
+    System.out.println("Task1");
+});
+// internally it stores in a map, for different threads</code></pre>
+<div class="diag"><div class="row"><div class="cb">ThreadLocal object</div></div><div class="row"><div class="cb sm">main &rarr; "main"</div><div class="cb sm">thread1 &rarr; "Thread-0"</div><div class="cb sm">thread2 &rarr; ...</div></div></div>
+<div class="box ex"><strong>Remember to clean up if reusing the thread</strong>
+<p>Suppose thread1 was doing task1 and it had data for task1; then it takes up task4, and the leftover data may cause problems. In a pool, threads are reused, so always clean up:</p>
+<pre><code class="java">poolObj.submit(() -&gt; {
+    threadLocalObj.set("value");
+    try {
+        // my work
+    } finally {
+        threadLocalObj.remove();      // always remove
+    }
+});</code></pre></div>
+<div class="box extra"><strong>Where it is used</strong>
+<p>Per-request context in web apps (user id, trace id, transaction), <code>SimpleDateFormat</code> (not thread-safe), Spring's <code>SecurityContextHolder</code> and transaction synchronisation. Forgetting <code>remove()</code> in a pool causes data leaks between requests and memory leaks.</p></div>
+
+<h2>Virtual thread vs platform thread</h2>
+<p><b>Motto of virtual threads: to get higher throughput, not lower latency</b> (let's say more tasks per second).</p>
+<h3>Platform (native) thread</h3>
+<pre><code class="java">Thread t1 = new Thread(() -&gt; { ... });
+t1.start();          // JVM tells the system: hey OS, create one native thread</code></pre>
+<div class="flow"><b>Platform thread</b><i>1 : 1</i><b>Native / OS thread</b></div>
+<p>A platform thread is managed by the JVM, but the JVM is just a <b>wrapper of the OS thread</b>.</p>
+<h4>Disadvantages</h4>
+<ol>
+<li><b>It's slow.</b> Thread creation takes time; that's why we used the thread pool executor, so that we don't create threads again and again. When we call <code>t1.start()</code>, Java calls the OS (a system call: expensive). Even with a pool executor we have to create the threads some time (min-max pool).</li>
+<li><b>Blocking wastes the OS thread.</b> T1 (platform thread) performs a DB call (let's say 4 seconds): this T1 is just a wrapper to an OS thread, so <b>the OS thread is just waiting for those 4 seconds</b>.</li>
+</ol>
+
+<h2>Virtual threads (JDK 21)</h2>
+<div class="diag">
+<div class="row"><div class="cb wide">Many virtual threads managed by the JVM: VT VT VT VT VT VT VT</div></div>
+<div class="row"><div class="cb">&darr; mounted on &darr;</div></div>
+<div class="row"><div class="cb sm">OS thread</div><div class="cb sm">OS thread</div></div></div>
+<ul>
+<li><b>Lightweight:</b> unlike traditional "platform" threads, which are 1:1 wrappers around OS threads and consume about 1 MB of stack memory each, virtual threads are managed by the JVM and start with a footprint of only a few hundred bytes.</li>
+<li><b>Scalable:</b> you can create <b>millions</b> of virtual threads on a single JVM, whereas platform threads are limited to a few thousand by OS resources.</li>
+<li>As the diagram shows, they use the OS only when required: multiple virtual threads but only 2 OS threads being used.</li>
+</ul>
+<h3>Key differences</h3>
+<table>
+<tr><th>Feature</th><th>Platform thread</th><th>Virtual thread</th></tr>
+<tr><td>Management</td><td>OS kernel</td><td>Java Virtual Machine (JVM)</td></tr>
+<tr><td>Resource cost</td><td>High (MBs per thread)</td><td>Very low (KBs per thread)</td></tr>
+<tr><td>Scalability</td><td>Limited by OS</td><td>Nearly unlimited (millions)</td></tr>
+<tr><td>Blocking I/O</td><td>Blocks the OS thread</td><td>Yields the OS thread for others</td></tr>
+</table>
+
+<h3>How they work</h3>
+<p>Virtual threads run on a small pool of platform threads called <b>carrier threads</b>.</p>
+<ul>
+<li><b>Mounting:</b> when a virtual thread has work to do, the JVM "mounts" it onto a carrier thread.</li>
+<li><b>Unmounting:</b> when the virtual thread performs a blocking operation (like a database call or network request), the JVM "unmounts" it and stores its state in the <b>heap</b>. This frees the carrier thread to execute other virtual threads.</li>
+</ul>
+<p>The actual "waiting" for data is handled by a background thread in the JVM, often called the <b>Read-Poller</b>. Once the OS signals that the data is ready (e.g. the database sent the response), the poller notifies the JVM scheduler. The scheduler then takes the virtual thread's state from the heap, remounts it onto any available carrier thread, and the code continues exactly where it left off.</p>
+<div class="flow"><b>Mounted on carrier</b><i>blocking call</i><b>Unmounted (state in heap)</b><i>data ready</i><b>Remounted on any carrier</b></div>
+
+<h3>Creating them</h3>
+<pre><code class="java">Thread th1 = Thread.ofVirtual().start(runnableTask);
+
+ExecutorService myExecutorObj = Executors.newVirtualThreadPerTaskExecutor();
+myExecutorObj.submit(runnableTask);</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><b>Don't pool virtual threads.</b> They are cheap, so create one per task. Pools exist to ration expensive resources (use a Semaphore to limit access to a scarce downstream resource).</li>
+<li>Virtual threads help <b>I/O-bound</b> work (many waiting requests). They do nothing for CPU-bound work.</li>
+<li>Pinning: blocking inside a <code>synchronized</code> block (before JDK 24) can pin the virtual thread to its carrier. Prefer <code>ReentrantLock</code> there.</li>
+<li>Spring Boot 3.2+ can turn them on with <code>spring.threads.virtual.enabled=true</code>.</li>
+<li>Virtual threads are always daemon threads.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Platform vs virtual threads?</summary><p>Platform threads are 1:1 with OS threads and heavy; virtual threads are JVM-managed, tiny, and release the carrier while blocked.</p></details>
+<details><summary>Do virtual threads make code faster?</summary><p>They raise throughput for blocking I/O workloads, not single-task latency or CPU-bound speed.</p></details>
+<details><summary>Why must ThreadLocal be cleaned up in thread pools?</summary><p>Pool threads are reused, so stale values leak into the next task and can cause memory leaks.</p></details>
+</div>

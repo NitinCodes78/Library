@@ -1,0 +1,146 @@
+<h1>Bean and its Lifecycle</h1>
+<p class="kicker">How Spring creates an object, prepares it, hands it to you, and later cleans it up.</p>
+
+<h2>What is a Bean?</h2>
+<p>A <b>bean</b> is simply a Java object whose creation and life is managed by the Spring <b>IoC container</b> (the <code>ApplicationContext</code>). You don't write <code>new OrderService()</code>; you describe the class, and Spring builds it, wires it, and keeps it.</p>
+<p>Two common ways to tell Spring "make this a bean":</p>
+<ul>
+<li><b>Stereotype annotations</b> on the class: <code>@Component</code>, <code>@Service</code>, <code>@Repository</code>, <code>@Controller</code>. Found by component scanning.</li>
+<li><b><code>@Bean</code> methods</b> inside a <code>@Configuration</code> class. Useful when the class is from a library and you can't annotate it.</li>
+</ul>
+
+<div class="box ex"><strong>Example: both ways</strong>
+<pre><code><span class="a">@Service</span>
+<span class="k">public class</span> OrderService { }
+
+<span class="a">@Configuration</span>
+<span class="k">public class</span> AppConfig {
+    <span class="a">@Bean</span>
+    <span class="k">public</span> ObjectMapper objectMapper() {
+        <span class="k">return new</span> ObjectMapper(); <span class="c">// third-party class</span>
+    }
+}</code></pre></div>
+
+<h2>@Component vs @Bean</h2>
+<p>The IoC container (the <code>ApplicationContext</code> provides its implementation) holds all the beans and manages them. There are two ways to create one.</p>
+<h3>1. @Component (and @Controller, @Service ...)</h3>
+<ul>
+<li>It follows <b>convention over configuration</b>: Spring Boot auto-configures based on conventions, reducing explicit configuration.</li>
+<li>Spring internally calls <code>new User()</code> for you. That works while the class has a default constructor.</li>
+</ul>
+<p>But what if the class only has a constructor with parameters?</p>
+<pre><code class="java">@Component
+public class User {
+    String username;
+    String email;
+
+    public User(String username, String email) {   // Spring does not know what to pass here
+        this.username = username;
+        this.email = email;
+    }
+}
+// APPLICATION FAILED TO START: no default constructor / unsatisfied parameter</code></pre>
+<h3>2. @Bean: we supply the configuration</h3>
+<p>Here <code>@Bean</code> comes in: we provide the construction details in a <code>@Configuration</code> class and Spring uses them when creating the bean.</p>
+<pre><code class="java">@Configuration
+public class AppConfig {
+
+    @Bean
+    public User user() {
+        return new User("defaultusername", "defaultemail");
+    }
+}</code></pre>
+<p>If you declare two <code>@Bean</code> methods that return the same class (say <code>user()</code> and <code>anotherUser()</code>), Spring creates <b>two beans</b> of it, named after the methods.</p>
+
+<h2>How does Spring find the beans?</h2>
+<ol>
+<li><b><code>@ComponentScan</code></b> scans the given package and its sub-packages for classes annotated with <code>@Component</code>, <code>@Service</code> and so on. <code>@SpringBootApplication</code> already includes it for the package of the main class.
+<pre><code class="java">@ComponentScan(basePackages = "com.conceptandcoding.learningspringboot")
+public class SpringbootApplication { ... }</code></pre></li>
+<li><b>Explicit definition</b> through <code>@Bean</code> methods inside a <code>@Configuration</code> class.</li>
+</ol>
+
+<h2>When are beans created?</h2>
+<table>
+<tr><th>Eager</th><th>Lazy</th></tr>
+<tr><td>Created when the application starts. Beans with <b>singleton</b> scope are eagerly initialised.</td><td>Created only when actually needed. Beans with scopes like <b>prototype</b>, or beans marked <code>@Lazy</code>.</td></tr>
+</table>
+
+<h2>The lifecycle at a glance</h2>
+<figure class="fig">
+<svg viewBox="0 0 640 470" role="img" aria-label="Bean lifecycle: container start, instantiate, inject dependencies, aware callbacks, post-processor before init, PostConstruct, afterPropertiesSet, post-processor after init, bean in use, PreDestroy, destroy">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8a8f96"/></marker></defs>
+<g font-family="Literata,serif" font-size="15">
+<g fill="none" stroke="#8a8f96" stroke-width="2" marker-end="url(#ar)">
+<path d="M150 64v14"/><path d="M150 124v14"/><path d="M150 184v14"/><path d="M150 244v14"/><path d="M150 304v14"/>
+<path d="M260 342C300 342 300 52 350 52"/><path d="M480 82v14"/><path d="M480 142v14"/><path d="M480 202v14"/>
+<path d="M480 262v84"/><path d="M480 392v14"/>
+</g>
+<g>
+<rect x="40" y="18" width="220" height="46" rx="10" fill="#e8eefc" stroke="#2b62ad"/><text x="150" y="46" text-anchor="middle" fill="#1d2125">1. Container starts</text>
+<rect x="40" y="78" width="220" height="46" rx="10" fill="#e8eefc" stroke="#2b62ad"/><text x="150" y="106" text-anchor="middle" fill="#1d2125">2. Instantiate (constructor)</text>
+<rect x="40" y="138" width="220" height="46" rx="10" fill="#e8eefc" stroke="#2b62ad"/><text x="150" y="166" text-anchor="middle" fill="#1d2125">3. Inject dependencies</text>
+<rect x="40" y="198" width="220" height="46" rx="10" fill="#e8eefc" stroke="#2b62ad"/><text x="150" y="226" text-anchor="middle" fill="#1d2125">4. Aware callbacks</text>
+<rect x="40" y="258" width="220" height="46" rx="10" fill="#fdf1e2" stroke="#e08a24"/><text x="150" y="286" text-anchor="middle" fill="#1d2125">5. BPP: before init</text>
+<rect x="40" y="318" width="220" height="46" rx="10" fill="#eaf6e6" stroke="#2f7d32"/><text x="150" y="346" text-anchor="middle" fill="#1d2125">6. @PostConstruct</text>
+<rect x="350" y="30" width="260" height="52" rx="10" fill="#eaf6e6" stroke="#2f7d32"/><text x="480" y="52" text-anchor="middle" fill="#1d2125">7. afterPropertiesSet()</text><text x="480" y="71" text-anchor="middle" fill="#5d646b" font-size="12">then custom init-method</text>
+<rect x="350" y="96" width="260" height="46" rx="10" fill="#fdf1e2" stroke="#e08a24"/><text x="480" y="124" text-anchor="middle" fill="#1d2125">8. BPP: after init</text>
+<rect x="350" y="156" width="260" height="46" rx="10" fill="#fff" stroke="#e08a24" stroke-dasharray="5 4"/><text x="480" y="184" text-anchor="middle" fill="#9a5b12" font-size="13">AOP proxy is created here</text>
+<rect x="350" y="216" width="260" height="46" rx="23" fill="#2f7d32"/><text x="480" y="244" text-anchor="middle" fill="#fff" font-weight="600">9. Ready, in use</text>
+<text x="480" y="310" text-anchor="middle" fill="#5d646b" font-size="13">app shutting down…</text>
+<rect x="350" y="346" width="260" height="46" rx="10" fill="#fbe9e7" stroke="#d0574a"/><text x="480" y="374" text-anchor="middle" fill="#1d2125">10. @PreDestroy</text>
+<rect x="350" y="406" width="260" height="52" rx="10" fill="#fbe9e7" stroke="#d0574a"/><text x="480" y="428" text-anchor="middle" fill="#1d2125">11. destroy()</text><text x="480" y="447" text-anchor="middle" fill="#5d646b" font-size="12">then custom destroy-method</text>
+</g></g>
+</svg>
+<figcaption>BPP = BeanPostProcessor. Blue: creation. Green: your init hooks. Red: your cleanup hooks.</figcaption>
+</figure>
+
+<h2>Step by step</h2>
+<ol>
+<li><b>Container starts.</b> Spring reads configuration and builds a <i>BeanDefinition</i> (a recipe) for every bean.</li>
+<li><b>Instantiate.</b> The constructor runs. With constructor injection, dependencies arrive right here.</li>
+<li><b>Inject.</b> Field and setter injection (<code>@Autowired</code>) happen now: Spring looks for a bean of the required type and injects it.</li>
+<li><b>Aware callbacks.</b> If the bean implements <code>BeanNameAware</code>, <code>ApplicationContextAware</code>…, Spring hands it that info.</li>
+<li><b>Before-init post-processing.</b> Every <code>BeanPostProcessor</code> gets a look at the bean.</li>
+<li><b>Init hooks</b>, in order: <code>@PostConstruct</code>, then <code>InitializingBean.afterPropertiesSet()</code>, then a custom <code>initMethod</code>.</li>
+<li><b>After-init post-processing.</b> This is where Spring may wrap your bean in a <b>proxy</b> (for <code>@Transactional</code>, <code>@Async</code>, AOP).</li>
+<li><b>In use</b> until the context closes.</li>
+<li><b>Destroy hooks:</b> <code>@PreDestroy</code>, then <code>DisposableBean.destroy()</code>, then a custom <code>destroyMethod</code>.</li>
+</ol>
+
+<div class="box ex"><strong>Example: watching the hooks fire</strong>
+<pre><code><span class="a">@Component</span>
+<span class="k">public class</span> CacheLoader {
+
+    <span class="a">@Autowired</span>
+    <span class="k">private</span> ProductRepository repo;
+
+    <span class="k">public</span> CacheLoader() {
+        <span class="c">// repo is still null here!</span>
+        System.out.println(<span class="s">"1. constructor"</span>);
+    }
+
+    <span class="a">@PostConstruct</span>
+    <span class="k">void</span> warmUp() {
+        <span class="c">// repo is injected now, safe to use</span>
+        System.out.println(<span class="s">"2. @PostConstruct, loading "</span> + repo.count());
+    }
+
+    <span class="a">@PreDestroy</span>
+    <span class="k">void</span> cleanUp() {
+        System.out.println(<span class="s">"3. @PreDestroy, flushing cache"</span>);
+    }
+}</code></pre></div>
+
+<p><code>@PostConstruct</code> runs <b>after</b> all dependencies have been injected (not right after the constructor, before injection). That is exactly why it exists: the constructor can't safely use field-injected dependencies, and <code>@PostConstruct</code> can.</p>
+
+<h2>Eager vs lazy, and scopes</h2>
+<p>Singleton beans are created <b>eagerly</b> at startup, so wiring errors show up immediately. Add <code>@Lazy</code> to create a bean only on first use.</p>
+<p>For <b>prototype</b> beans, Spring creates a fresh object per request and runs the init hooks, but <b>never calls destroy hooks</b>. After handing it over, Spring stops tracking it. Cleanup is your job.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why not put startup logic in the constructor?</summary><p>With field or setter injection, dependencies are still null in the constructor. Use <code>@PostConstruct</code>, or prefer constructor injection so everything arrives together.</p></details>
+<details><summary>Are destroy callbacks called for prototype beans?</summary><p>No. The container doesn't manage a prototype after creation, so <code>@PreDestroy</code> never runs for it.</p></details>
+<details><summary>Where in the lifecycle are proxies created, and why does it matter?</summary><p>In <code>postProcessAfterInitialization</code>. Other beans receive the proxy, not the raw object. That's why calling a <code>@Transactional</code> method from inside the same class (self-invocation) skips the transaction: the call never goes through the proxy.</p></details>
+<details><summary>BeanPostProcessor vs BeanFactoryPostProcessor?</summary><p>BeanFactoryPostProcessor edits bean <i>definitions</i> before any bean exists (e.g. resolving <code>${...}</code> placeholders). BeanPostProcessor works on bean <i>instances</i> during the lifecycle.</p></details>
+</div>

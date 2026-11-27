@@ -1,0 +1,282 @@
+<h1>Spring Boot Security: Parts 2 and 3 (User Creation and Form Login)</h1>
+<p class="kicker">Where users come from (default, in-memory, database), password encoding, and form-based stateful authentication with sessions and roles.</p>
+
+<h2>User creation</h2>
+<p>Authentication and authorization of a user happen only <b>after the user is created</b>, so that is the first step. Add the security starter and start the server. In the logs you will see <code>Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager</code> and a generated password.</p>
+<ul>
+<li>During startup a user is created automatically with the default username <b><code>user</code></b>.</li>
+<li>A <b>random password</b> is generated (printed in the log) for testing. Every restart generates a new one.</li>
+</ul>
+<p>Internally, <code>UserDetailsServiceAutoConfiguration</code> reads <code>SecurityProperties</code> and builds an <code>InMemoryUserDetailsManager</code> (which keeps users in a <code>Map&lt;String, MutableUserDetails&gt;</code> and adds each through <code>createUser</code>).</p>
+
+<h3>How can we control user creation?</h3>
+<h4>1st: application.properties (only for development and testing)</h4>
+<pre><code>spring.security.user.name=my_username
+spring.security.user.password=my_password
+spring.security.user.roles=ADMIN</code></pre>
+<p>Internally it uses reflection to call the setters on <code>SecurityProperties</code> and overrides the defaults. No default user or random password is generated now.</p>
+
+<h4>2nd: a custom InMemoryUserDetailsManager bean</h4>
+<div class="flow"><b>UserDetailsService</b><i>extended by</i><b>UserDetailsManager</b><i>implemented by</i><b>InMemoryUserDetailsManager</b></div>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public UserDetailsService userDetailsService() {
+        UserDetails user1 = User.withUsername("my_username_1")
+                .password("{noop}my_password_1")
+                .roles("ADMIN")
+                .build();
+        UserDetails user2 = User.withUsername("my_username_2")
+                .password("{noop}my_password_2")
+                .roles("USER")
+                .build();
+        return new InMemoryUserDetailsManager(user1, user2);
+    }
+}</code></pre>
+
+<h4>Why do we append {noop}?</h4>
+<p>The default storage format of a password is <code>{id}encodedPassword</code>, where <code>{id}</code> can be <code>{noop}</code>, <code>{bcrypt}</code>, <code>{sha256}</code> and so on.</p>
+<ul>
+<li>To store a password <b>without any encoding or hashing</b>, store <code>{noop}plain_password</code>.</li>
+</ul>
+<p>During authentication:</p>
+<ol>
+<li>It fetches the user's stored password (here from memory).</li>
+<li>It goes to the comparison logic: stored password vs the password provided for authentication.</li>
+<li>It reads the <code>{id}</code> prefix (<code>{noop}</code>, <code>{bcrypt}</code> ...) and strips it from the stored value.</li>
+<li>If <code>{noop}</code>, it compares the remaining stored password directly with the provided password.</li>
+<li>If <code>{bcrypt}</code>, it hashes the provided password with <code>BCryptPasswordEncoder</code> and matches it with the remaining stored hash.</li>
+</ol>
+<div class="diag">
+<div class="row"><div class="cb wide">PasswordEncoder (interface)</div></div>
+<div class="row"><div class="cb sm">DelegatingPasswordEncoder<br><small>the default; delegates to another encoder based on {id}</small></div><div class="cb sm">BCryptPasswordEncoder</div><div class="cb sm">NoOpPasswordEncoder</div></div>
+</div>
+<p>Store a bcrypt hash with the <code>{bcrypt}</code> prefix:</p>
+<pre><code class="java">@Bean
+public UserDetailsService userDetailsService() {
+    UserDetails user1 = User.withUsername("my_username_1")
+            .password("{bcrypt}" + new BCryptPasswordEncoder().encode("my_password_1"))
+            .roles("ADMIN")
+            .build();
+    return new InMemoryUserDetailsManager(user1);
+}</code></pre>
+<p>Memory holds <code>{bcrypt}hashed_password</code>. When we log in with <code>my_password_1</code> it still succeeds, because the <code>DelegatingPasswordEncoder</code> first checks the stored format <code>{bcrypt}</code> and passes the incoming password to <code>BCryptPasswordEncoder</code>, which hashes and matches it.</p>
+<p>If we do not want the <code>{id}</code> prefix, define which encoder to use as a bean. Since we always use one algorithm, control does not go through the <code>DelegatingPasswordEncoder</code> and goes straight to that encoder, so no <code>{id}</code> is needed in front of the password:</p>
+<pre><code class="java">@Configuration
+public class SecurityConfig {
+    @Bean
+    public PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
+
+    @Bean
+    public UserDetailsService userDetailsService() {
+        UserDetails user = User.withUsername("my_username_1")
+                .password(new BCryptPasswordEncoder().encode("my_password_1"))
+                .roles("ADMIN")
+                .build();
+        return new InMemoryUserDetailsManager(user);
+    }
+}</code></pre>
+
+<h4>3rd: store username and hashed password in the DB (recommended for production)</h4>
+<pre><code class="java">@Entity
+@Table(name = "user_auth")
+public class UserAuthEntity implements UserDetails {    // implements UserDetails
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String username;
+    private String password;
+    private String role;
+    // getters, plus UserDetails methods: getAuthorities() returns List.of(new SimpleGrantedAuthority(role)) ...
+}
+
+public interface UserAuthEntityRepository extends JpaRepository&lt;UserAuthEntity, Long&gt; {
+    Optional&lt;UserAuthEntity&gt; findByUsername(String username);
+}
+
+@Service
+public class UserAuthEntityService implements UserDetailsService {   // implements UserDetailsService
+    @Autowired private UserAuthEntityRepository userAuthEntityRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        return userAuthEntityRepository.findByUsername(username)
+                .orElseThrow(() -&gt; new UsernameNotFoundException("User not found"));
+    }
+}
+
+@RestController
+@RequestMapping("/auth")
+public class AuthController {
+    @Autowired private UserAuthEntityService userAuthEntityService;
+    @Autowired private PasswordEncoder passwordEncoder;
+
+    @PostMapping("/register")
+    public ResponseEntity&lt;String&gt; register(@RequestBody UserAuthEntity userAuthDetails) {
+        userAuthDetails.setPassword(passwordEncoder.encode(userAuthDetails.getPassword()));   // store the hash only
+        userAuthDetails.setRole("ROLE_USER");
+        userAuthEntityService.saveUser(userAuthDetails);
+        return ResponseEntity.ok("User registered successfully");
+    }
+}</code></pre>
+<ul>
+<li><b>Why implement <code>UserDetails</code>?</b> During authentication (form, basic, JWT ...) the framework fetches the user and expects a <code>UserDetails</code> object. If our entity does not implement it, we would have to map <code>UserAuthEntity</code> to <code>UserDetails</code> ourselves.</li>
+<li><b>Why implement <code>UserDetailsService</code>?</b> Same reason: whatever the authentication method (basic, JWT ...), Spring Security first tries to <b>load the user</b>. Since we keep username and password in a DB, Spring Security does not know how to fetch them unless we provide this service.</li>
+</ul>
+<p>By default all endpoints are <b>authenticated</b>, so how do we reach <code>/auth/register</code>, which is just the first step to create a user? We <b>relax authentication for this API</b>, which is industry standard:</p>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    @Bean
+    public PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.csrf(csrf -&gt; csrf.disable())            // see the CSRF note below
+            .authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/auth/register").permitAll()
+                .anyRequest().authenticated())
+            .httpBasic(Customizer.withDefaults());
+        return http.build();
+    }
+}</code></pre>
+<p>After calling register the response says "User registered successfully" and the <code>USER_AUTH</code> table has the row with the <b>bcrypt hash</b> (<code>$2a$10$...</code>), role <code>ROLE_USER</code> and the username; the raw password is never stored.</p>
+<p>(<code>csrf.disable()</code> is only here so that a plain Postman POST to register works. For form login keep CSRF on, see the disadvantages below.)</p>
+
+<h2>Form login authentication</h2>
+<ul>
+<li>A <b>stateful</b> authentication method: the server maintains the user's authentication state (a <b>session</b>), so the user does not provide username/password with every request.</li>
+<li>The user enters credentials in an HTML login form. On success a session (<code>JSESSIONID</code>) is created to keep the authentication state across requests.</li>
+<li>With subsequent requests the client passes only the <code>JSESSIONID</code> (cookie), and the server validates it against the stored session.</li>
+<li>It is the <b>default authentication method</b> of Spring Boot Security. Default login URL <code>/login</code>, logout URL <code>/logout</code>.</li>
+</ul>
+<div class="diag">
+<div class="row"><div class="cb sm">1. Client: POST /login<br><small>username, password</small></div><div class="cb sm">2. Server creates an HTTP session, SESSION ID = #1, saves it in the servlet container</div></div>
+<div class="row"><div class="cb sm">3. Response: <code>Set-Cookie: JSESSIONID=#1</code></div><div class="cb sm">4. Next request: <code>Cookie: JSESSIONID=#1</code></div></div>
+<div class="row"><div class="cb wide">5. Server searches the HTTP session with id #1: found and valid, the request is fulfilled; not found or invalid, the user must authenticate again</div></div>
+</div>
+<ul>
+<li>By default the session time to live is <b>30 minutes</b> (depends on the servlet container), and we can configure it.</li>
+<li>We can also store the HTTP session in the DB.</li>
+</ul>
+<pre><code>application.properties
+server.servlet.session.timeout=1m       # session expires after 1 minute of inactivity
+
+# store the session in the DB (needs spring-session-jdbc)
+spring.session.store-type=jdbc          # not needed in newer Boot versions, the dependency is auto-detected
+spring.session.jdbc.initialize-schema=always</code></pre>
+<p>Note: if user activity keeps happening, the expiry keeps getting pushed out, so the session does not expire while the user is active. Spring Boot automatically creates and manages the <code>SPRING_SESSION</code> table (and <code>SPRING_SESSION_ATTRIBUTES</code>), and its expiry time keeps increasing as the user keeps sending requests.</p>
+
+<h3>Flow for form-based authentication</h3>
+<p><b>1. First login</b> (no session exists yet, only the user exists): the login API is invoked.</p>
+<div class="flow"><b>Request /login</b><i>Tomcat filters</i><b>Security Filter Chain: UsernamePasswordAuthenticationFilter</b><i>delegates</i><b>AuthenticationManager</b><i>provider</i><b>DaoAuthenticationProvider</b><i>loads user</i><b>UserDetailsService</b><b>PasswordEncoder</b><i>matches</i><b>SecurityContext saved in HttpSession</b></div>
+<ol>
+<li><code>UsernamePasswordAuthenticationFilter</code> builds an <code>Authentication</code> object (username, password) and delegates to the <b>AuthenticationManager</b>.</li>
+<li>It goes to the <code>AuthenticationProvider</code> (default <code>DaoAuthenticationProvider</code>).</li>
+<li>The provider gets the stored user from the <code>UserDetailsService</code> (<code>InMemoryUserDetailsManager</code>, or <code>JdbcUserDetailsManager</code> to manage users in the DB) and validates the incoming raw password with the <b>PasswordEncoder</b> against the stored hashed password.</li>
+<li>On success a fully populated <code>Authentication</code> object (username, roles) is stored in the <b>SecurityContext</b>, and the <code>HttpSessionSecurityContextRepository</code> saves that SecurityContext in the HTTP session.</li>
+</ol>
+<p>After successful authentication: if the <code>/login</code> endpoint was used directly, the user is sent to the default endpoint (<code>/</code>, for example returning "hello"). If the user had first requested a specific endpoint (say <code>/users</code>), they were redirected to login, and after authenticating <b>that specific endpoint</b> is invoked.</p>
+<p><b>2. Subsequent APIs after authentication:</b></p>
+<ol>
+<li>The request goes through the security filter chain; the <b>SecurityContextHolderFilter</b> tries to read the HTTP session based on the <code>JSESSIONID</code>.</li>
+<li>If the session is not valid or not found, the user is redirected to authenticate first.</li>
+<li>Otherwise the <code>SecurityContext</code> is loaded from the session via <code>HttpSessionSecurityContextRepository</code> into the <code>SecurityContextHolder</code>, which tells the later filters whether the request is authenticated, and the request goes on to the controller.</li>
+</ol>
+
+<h3>It needs almost no code</h3>
+<p>Form login is the default, so we do not write a line of code for it: it is all handled by the framework. <code>SpringBootWebSecurityConfiguration</code> provides the default chain:</p>
+<pre><code class="java">@Bean
+SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+    http.authorizeHttpRequests(requests -&gt; requests.anyRequest().authenticated());
+    http.formLogin(withDefaults());
+    http.httpBasic(withDefaults());
+    return http.build();
+}</code></pre>
+<p>All we added is the dependency and config (and, instead of a random password every time, the hard-coded user from the previous section if we want one):</p>
+<pre><code>pom.xml: spring-boot-starter-security, spring-session-jdbc
+
+application.properties
+spring.security.user.name=user
+spring.security.user.password=pass
+spring.session.jdbc.initialize-schema=always
+server.servlet.session.timeout=5m</code></pre>
+<p>If we want to change things (custom login and logout pages, relax authentication on a few endpoints), we override the default <code>SecurityFilterChain</code> bean.</p>
+
+<h2>Authorization</h2>
+<p>Form based authentication is clear, but one thing is left: <b>authorization</b>. Once the user is authenticated and tries to access a resource, a check is needed to make sure the user has permission. By default Spring Boot Security puts <b>no restriction</b> on any resource; we do it manually. Authorization has <b>2 phases</b>:</p>
+<ol>
+<li><b>Check as part of the SecurityFilter</b>, with <code>requestMatchers(...)</code> (covered now).</li>
+<li><b>Check after the request passes the SecurityFilter and reaches the controller</b>, with method security (covered later, common to all authentication methods: form, basic, JWT).</li>
+</ol>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/users").hasRole("USER")
+                .anyRequest().authenticated())
+            .formLogin(Customizer.withDefaults());
+        return http.build();
+    }
+}
+
+application.properties
+spring.security.user.name=user
+spring.security.user.password=pass
+spring.security.user.roles=USER</code></pre>
+<ul>
+<li>Any user trying to access <code>/users</code> must have the role <code>ROLE_USER</code>.</li>
+<li>While using <code>hasRole</code> we do <b>not</b> write the <code>ROLE_</code> prefix; it is appended automatically.</li>
+<li>The <code>AuthorizationFilter</code> checks whether the endpoint has a restriction (for example a required role); if yes, it matches the roles in the <code>SecurityContext</code> with what the endpoint requires. If the required role is missing, it throws a <b>Forbidden</b> error (<code>type=Forbidden, status=403</code>).</li>
+<li>A role can have any name (ADMIN, USER, ANONYMOUS ...) as it is just a string, but it should follow a proper meaning.</li>
+<li>More than one role can be assigned to a user: <code>spring.security.user.roles=USER,ADMIN</code>, and the rule can be <code>hasAnyRole("USER", "ADMIN")</code>.</li>
+</ul>
+
+<h2>Controlling sessions per user</h2>
+<p>One user can keep logging in from different browsers. How do we restrict the number of sessions per user?</p>
+<pre><code class="java">http.authorizeHttpRequests(auth -&gt; auth
+        .requestMatchers("/users").hasRole("USER")
+        .anyRequest().authenticated())
+    .sessionManagement(session -&gt; session
+        .maximumSessions(1)
+        .maxSessionsPreventsLogin(true))
+    .formLogin(Customizer.withDefaults());</code></pre>
+<ul>
+<li>I am already logged in from one browser. When I try to log in from a different browser as the same user, the login page shows <b>"Maximum sessions of 1 for this principal exceeded"</b>.</li>
+<li><code>maxSessionsPreventsLogin(true)</code> blocks the <b>new</b> login. With <code>false</code> (the default), the new login is allowed and the <b>oldest session is expired</b> instead.</li>
+</ul>
+
+<h3>Session creation policies</h3>
+<pre><code class="java">.sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))</code></pre>
+<table>
+<tr><th>Policy</th><th>Behaviour</th></tr>
+<tr><td><code>IF_REQUIRED</code></td><td>HttpSession is created only when needed (<b>default</b>). Example: for a public API where authentication is not required, no HttpSession is created.</td></tr>
+<tr><td><code>ALWAYS</code></td><td>HttpSession is always created; if one already exists it is used. Even for a public API with no authentication, a session is created.</td></tr>
+<tr><td><code>NEVER</code></td><td>Does not create a session, but uses one if present.</td></tr>
+<tr><td><code>STATELESS</code></td><td>No session is created; used for stateless applications.</td></tr>
+</table>
+
+<h2>Disadvantages of form-based authentication</h2>
+<ol>
+<li><b>Vulnerable to security issues like CSRF and session hijacking.</b> By default CSRF protection is <b>enabled</b> for form-based login and we should <b>not disable it</b> (<code>.csrf(csrf -&gt; csrf.disable())</code> is something we should not do for form-based authentication).</li>
+<li><b>Session management is a big overhead</b>, and in a distributed system it can lead to scalability issues.</li>
+<li><b>Database load:</b> if there are multiple servers, we may need to store the session in a DB or a cache, which again needs memory and lookup time, and can cause latency.</li>
+</ol>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Never store raw passwords: BCrypt adds a salt and is deliberately slow, which defends against brute force and rainbow tables.</li>
+<li>In Spring Security 6 you configure with the lambda DSL (<code>http.authorizeHttpRequests(auth -&gt; ...)</code>) and <code>requestMatchers</code>; the older <code>antMatchers</code>/<code>authorizeRequests</code> are gone. <code>WebSecurityConfigurerAdapter</code> is removed as well.</li>
+<li>Roles are authorities with the <code>ROLE_</code> prefix: <code>hasRole("ADMIN")</code> is the same as <code>hasAuthority("ROLE_ADMIN")</code>.</li>
+<li>Unauthenticated gives <b>401</b>; authenticated but not permitted gives <b>403</b>.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What does {noop} / {bcrypt} mean in a stored password?</summary><p>It is the id the <code>DelegatingPasswordEncoder</code> uses to choose the encoder that matches the stored hash.</p></details>
+<details><summary>What do UserDetails and UserDetailsService do?</summary><p>UserDetails is the user model Spring Security understands; UserDetailsService loads it by username for the authentication provider.</p></details>
+<details><summary>Stateful vs stateless authentication?</summary><p>Stateful: the server keeps a session. Stateless: each request carries its own proof (Basic header, JWT), and the server stores nothing.</p></details>
+<details><summary>How do you limit concurrent logins?</summary><p><code>sessionManagement().maximumSessions(n)</code> with <code>maxSessionsPreventsLogin</code> to either block the new login or expire the old session.</p></details>
+</div>

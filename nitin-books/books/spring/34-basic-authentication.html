@@ -1,0 +1,97 @@
+<h1>Spring Boot Security: Basic Authentication</h1>
+<p class="kicker">Stateless authentication where the client sends username and password in the Authorization header on every request.</p>
+
+<h2>What it is</h2>
+<ul>
+<li>A <b>stateless</b> authentication method: the server does <b>not</b> maintain the user's authentication state (no session).</li>
+<li>The client must pass the username and password <b>with every request</b> using the <code>Authorization</code> header:</li>
+</ul>
+<pre><code>Authorization: Basic &lt;base64(username:password)&gt;</code></pre>
+<ul>
+<li>The credentials are encoded with <b>Base64, which is not encryption</b>, so Basic authentication is insecure over plain HTTP. Always use HTTPS.</li>
+</ul>
+
+<h2>Step by step</h2>
+<h3>1st: create a user</h3>
+<p>We have already discussed all the ways to create users (properties, in-memory bean, DB with a registration API and BCrypt) in the previous chapter; refer to it if there is any doubt. For testing:</p>
+<pre><code>application.properties
+spring.security.user.name=my_username
+spring.security.user.password=my_password
+spring.security.user.roles=USER</code></pre>
+
+<h3>2nd: how the header is read</h3>
+<p>The <code>BasicAuthenticationFilter</code>:</p>
+<ol>
+<li>Reads the <code>Authorization</code> header.</li>
+<li>Decodes the Base64 value to get the username and password the client passed.</li>
+<li>Creates an <code>UsernamePasswordAuthenticationToken</code> and hands it to the <code>AuthenticationManager</code>.</li>
+</ol>
+<p>For example <code>Authorization: Basic bXlfdXNlcm5hbWU6bXlfcGFzc3dvcmQ=</code> decodes to <code>my_username:my_password</code>. (Postman does the encoding for you when you choose Basic Auth.)</p>
+
+<h3>Why in the Authorization header, and not in the body or elsewhere?</h3>
+<ol>
+<li><b>Standard.</b> The HTTP standard (RFC 7617) defines this format, so it is universally accepted across APIs and clients. If everybody sent credentials differently (some in headers, some in the body ...), dealing with multiple APIs and clients would be difficult.</li>
+<li><b>Security.</b> Web servers sometimes log the request <b>body</b> for debugging or analytics, but headers like Authorization are typically not logged, which reduces the risk of exposing the credentials.</li>
+<li><b>Support for all HTTP methods.</b> Apart from POST and PUT, requests like GET do not accept a body. With headers, credentials can be sent consistently for every kind of API.</li>
+</ol>
+
+<h2>The flow</h2>
+<p>If the form-based flow is understood, this is very similar, just without a session.</p>
+<div class="flow"><b>Request + Authorization header</b><i>Tomcat filters</i><b>Security Filter Chain: BasicAuthenticationFilter</b><i>decode header</i><b>AuthenticationManager</b><i>provider</i><b>DaoAuthenticationProvider</b><i>load user</i><b>UserDetailsService</b><i>hash and compare</i><b>PasswordEncoder</b><i>on success</i><b>AuthorizationFilter</b><i>role check</i><b>Controller</b></div>
+<ol>
+<li><code>BasicAuthenticationFilter</code> decodes the Authorization header and builds the authentication object (username and password).</li>
+<li><code>AuthenticationManager</code> to <code>AuthenticationProvider</code> (default DAO implementation).</li>
+<li>The provider fetches the user via <code>UserDetailsService</code> (<code>InMemoryUserDetailsManager</code> or <code>JdbcUserDetailsManager</code> to manage username/password in the DB), hashes the incoming password with the <code>PasswordEncoder</code> and compares it with the stored hash.</li>
+<li>On success the authenticated object goes into the <code>SecurityContext</code> <b>for this request only</b> (stateless: nothing is saved in a session).</li>
+<li><code>AuthorizationFilter</code> checks the role needed by the endpoint, then the controller runs.</li>
+</ol>
+
+<h2>What we need to implement it</h2>
+<pre><code>pom.xml: spring-boot-starter-security (+ web)
+application.properties: the user, as above</code></pre>
+<pre><code class="java">@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.authorizeHttpRequests(auth -&gt; auth
+                .requestMatchers("/users").hasAnyRole("USER", "ADMIN")      // added for authorization
+                .anyRequest().authenticated())
+            .sessionManagement(session -&gt; session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))     // stateless: no session
+            .csrf(csrf -&gt; csrf.disable())                                   // CSRF is not required for a stateless API
+            .httpBasic(Customizer.withDefaults());                          // Basic authentication
+        return http.build();
+    }
+}</code></pre>
+<ul>
+<li><code>httpBasic(...)</code> turns Basic authentication on (and we do not call <code>formLogin</code>).</li>
+<li><code>STATELESS</code> tells Spring not to create or use an <code>HttpSession</code>.</li>
+<li>CSRF protection is not needed here because the browser does not automatically attach Basic credentials in the way it attaches session cookies to forged requests from other sites (a client-side script must set the header itself). Keep it enabled if a browser could be sending the credentials automatically.</li>
+</ul>
+
+<h2>Disadvantages of Basic authentication</h2>
+<ol>
+<li><b>Credentials are sent in every request.</b> If HTTPS is not enforced they can be intercepted and decoded.</li>
+<li>If the credentials are compromised, the <b>only way is to change the credentials</b> (there is no short-lived token to revoke).</li>
+<li><b>Not suitable for large-scale applications</b>, as sending credentials with every request is extra overhead:
+<ul>
+<li>the request size grows because of the Authorization header;</li>
+<li>extra work like decoding, hashing the incoming password (BCrypt is intentionally slow) and comparing, on every single request;</li>
+<li>a DB lookup to fetch the user details, which increases latency too.</li>
+</ul></li>
+</ol>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Basic authentication is fine for service-to-service calls inside a trusted network, internal tools and quick tests. For user-facing APIs prefer token based approaches (JWT, OAuth2), covered next.</li>
+<li>The 401 response carries <code>WWW-Authenticate: Basic realm="Realm"</code>, which makes a browser pop up its own login dialog.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Is Base64 encryption?</summary><p>No, it is reversible encoding. Anyone who sees the header can decode it, so use HTTPS.</p></details>
+<details><summary>Why is Basic authentication called stateless?</summary><p>The server keeps no session; credentials arrive and are verified on every request.</p></details>
+<details><summary>Why send credentials in a header instead of the body?</summary><p>RFC 7617 standard format, headers are less likely to be logged than bodies, and it works for GET requests which have no body.</p></details>
+<details><summary>Why disable CSRF with Basic auth plus STATELESS?</summary><p>CSRF abuses ambient cookie-based sessions; with no session and an explicit header there is nothing automatically attached by the browser to forge.</p></details>
+</div>

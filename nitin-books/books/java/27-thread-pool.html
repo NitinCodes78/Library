@@ -1,0 +1,112 @@
+<h1>Thread Pool and ThreadPoolExecutor</h1>
+<p class="kicker">Reuse workers instead of creating a thread for every task.</p>
+
+<h2>What is a thread pool?</h2>
+<ul>
+<li>A collection of threads (aka <b>workers</b>) which are available to perform the submitted tasks.</li>
+<li>Once a task is completed, the worker thread gets back to the pool and waits for a new task to be assigned.</li>
+<li>That means <b>threads can be reused</b>. Otherwise we had to create them manually using <code>new Thread()</code>, which takes some time. Via a thread pool, we have already created the threads.</li>
+</ul>
+<div class="diag"><div class="row"><div class="cb">Application submitting new tasks</div><div class="cb wide">Task queue: Task n ... Task 3 | Task 2 | Task 1</div><div class="cb">Thread pool<br><small>Thread 1, Thread 2, ... Thread n</small></div></div></div>
+
+<h2>Advantages of a thread pool</h2>
+<table>
+<tr><th>Benefit</th><th>Why</th></tr>
+<tr><td><b>Thread creation time is saved</b></td><td>When each thread is created, space is allocated to it (stack, program counter etc.) and this takes time. With a pool this is avoided by reusing the thread.</td></tr>
+<tr><td><b>Overhead of managing the thread lifecycle is removed</b></td><td>A thread has different states like running, waiting, terminated; managing thread state adds complexity. The pool abstracts this management away.</td></tr>
+<tr><td><b>Increased performance</b></td><td>More threads means more context-switching time. With control over thread creation, excess context switching can be avoided.</td></tr>
+</table>
+
+<h2>The java.util.concurrent hierarchy</h2>
+<div class="diag">
+<div class="row"><div class="cb">&laquo;interface&raquo;<br><b>Executor</b><br><small>a single method <code>execute()</code></small></div></div>
+<div class="row"><div class="cb">&uarr; extends</div></div>
+<div class="row"><div class="cb">&laquo;interface&raquo;<br><b>ExecutorService</b><br><small>various methods like <code>shutdown()</code>, <code>shutdownNow()</code></small></div></div>
+<div class="row"><div class="cb sm">class<br><b>ThreadPoolExecutor</b></div><div class="cb sm">class<br><b>ForkJoinPool</b></div><div class="cb sm">&laquo;interface&raquo;<br><b>ScheduledExecutorService</b><br>&darr; implements<br><b>ScheduledThreadPoolExecutor</b></div></div></div>
+
+<h2>ThreadPoolExecutor</h2>
+<p>It helps to create a <b>customizable</b> thread pool.</p>
+<h3>How it works: a worked scenario</h3>
+<p>Say core (min) pool size = 3, max pool size = 5, queue size = 5.</p>
+<ol>
+<li>Tasks 1 to 3 come: each gets a free thread (T1, T2, T3). Check whether any thread is free in the pool.</li>
+<li>Tasks 4 to 8 come, all 3 threads are busy: they <b>go in the queue</b> (size = 5), no new thread is made.</li>
+<li>Task 9 comes, the pool has all its threads occupied and the queue is also full. Since max pool size = 5, <b>one more thread T4</b> gets in the pool and takes task 9.</li>
+<li>Task 10 comes: a new thread T5 takes task 10.</li>
+<li>Now we'll have to <b>reject</b> task 11 if it comes, as max pool size has been reached and the queue is full.</li>
+<li>Suppose T3 is now free: then T3 will take task 4 from the queue.</li>
+</ol>
+<div class="flow"><b>Task</b><i>free core thread?</i><b>run it</b><i>else queue not full?</i><b>queue it</b><i>else pool &lt; max?</i><b>new thread</b><i>else</i><b>reject</b></div>
+
+<h3>The constructor</h3>
+<pre><code class="java">public ThreadPoolExecutor(
+        int corePoolSize,
+        int maximumPoolSize,
+        long keepAliveTime,
+        TimeUnit unit,
+        BlockingQueue&lt;Runnable&gt; workQueue,
+        ThreadFactory threadFactory,
+        RejectedExecutionHandler handler)</code></pre>
+<table>
+<tr><th>Parameter</th><th>Meaning</th></tr>
+<tr><td><b>corePoolSize</b></td><td>Number of threads initially created and kept in the pool, even if they are idle.</td></tr>
+<tr><td><b>allowCoreThreadTimeOut</b> <small>(not a constructor parameter)</small></td><td>If this property is set to TRUE (by default it's FALSE), idle core threads are kept alive only for the time specified by <code>keepAliveTime</code>, else they get terminated.</td></tr>
+<tr><td><b>keepAliveTime</b></td><td>Threads which are idle get terminated after this time.</td></tr>
+<tr><td><b>TimeUnit</b></td><td>Unit for the keepAliveTime: milliseconds, seconds, hours etc.</td></tr>
+<tr><td><b>maxPoolSize</b></td><td>Maximum number of threads allowed in a pool. If number of threads == corePoolSize <b>and the queue is also full</b>, then new threads are created (till it's less than maxPoolSize). Excess threads remain in the pool until the pool is shut down, or, if allowCoreThreadTimeOut is true, they get terminated after remaining idle for keepAliveTime.</td></tr>
+<tr><td><b>BlockingQueue</b></td><td>Queue used to hold tasks before they get picked by a worker thread.</td></tr>
+<tr><td><b>ThreadFactory</b></td><td>Factory for creating a new thread. We can give a custom thread name, custom priority, set the daemon flag etc.</td></tr>
+<tr><td><b>RejectedExecutionHandler</b></td><td>Handler for tasks that cannot be accepted by the pool. Generally logging logic can be put here, for debugging purposes.</td></tr>
+</table>
+<div class="box ex"><strong>Why queue first, not a new thread?</strong>
+<p>We put tasks in the queue and do <b>not</b> get new threads in the pool till the queue is full: that's the intended behaviour. Say min pool size = 3 and max = 5 and a 4th task comes: we don't get a new thread but put it in the queue, because we assume the 3 threads are consumed only on average. After task 4 is finished, there is no thread 4 sitting idle in the pool.</p></div>
+
+<h3>BlockingQueue</h3>
+<div class="diag"><div class="row"><div class="cb">&laquo;interface&raquo; Queue</div></div><div class="row"><div class="cb">&uarr; extends</div></div><div class="row"><div class="cb">&laquo;interface&raquo; BlockingQueue</div></div><div class="row"><div class="cb sm">class<br><b>ArrayBlockingQueue</b></div><div class="cb sm">class<br><b>LinkedBlockingQueue</b></div></div></div>
+<ul>
+<li><b>Bounded queue:</b> queue with a fixed capacity, like <code>ArrayBlockingQueue</code>. Gives you <b>full control over how many tasks wait</b> in the queue.</li>
+<li><b>Unbounded queue:</b> queue with no fixed capacity, like <code>LinkedBlockingQueue</code>.</li>
+</ul>
+<p><b>An unbounded queue means maxPoolSize is never used.</b> The pool only grows beyond core size when the queue is <b>full</b>. With an unbounded queue it is never full, so the pool stays at corePoolSize and a task flood just piles up in memory (a classic production out-of-memory cause).</p>
+
+<h3>RejectedExecutionHandler policies</h3>
+<table>
+<tr><th>Policy</th><th>What it does</th></tr>
+<tr><td><code>new ThreadPoolExecutor.AbortPolicy()</code></td><td>Throws <code>RejectedExecutionException</code> (the default).</td></tr>
+<tr><td><code>new ThreadPoolExecutor.CallerRunsPolicy()</code></td><td>Executes the rejected task in the caller thread (the thread that attempted to submit the task). This also slows the producer down naturally.</td></tr>
+<tr><td><code>new ThreadPoolExecutor.DiscardPolicy()</code></td><td>Silently discards the rejected task, without throwing any exception.</td></tr>
+<tr><td><code>new ThreadPoolExecutor.DiscardOldestPolicy()</code></td><td>Discards the oldest task in the queue, to accommodate the new task.</td></tr>
+</table>
+
+<h2>Lifecycle of a ThreadPoolExecutor</h2>
+<div class="flow"><b>Running</b><i>shutdown()</i><b>Shutdown</b><i>queue drained</i><b>Terminated</b></div>
+<div class="flow"><b>Running</b><i>shutdownNow()</i><b>Stop</b><i>all stopped</i><b>Terminated</b></div>
+<ul>
+<li><b>Running:</b> executor is in running state and the <code>submit()</code> method is used to add new tasks.</li>
+<li><b>Shutdown:</b> executor does not accept new tasks, but continues to process existing tasks; once existing tasks are finished, the executor moves to the terminated state. Method used: <code>shutdown()</code>.</li>
+<li><b>Stop (force shutdown):</b> executor doesn't accept new tasks. It also forcefully stops all the tasks which are currently running. Moves to terminated state once fully shut down. Method used: <code>shutdownNow()</code>.</li>
+<li><b>Terminated:</b> end of life for the particular ThreadPoolExecutor. The <code>isTerminated()</code> method can be used to check if the pool is terminated or not.</li>
+</ul>
+<div class="box extra"><strong>Good to know</strong>
+<p><code>shutdownNow()</code> interrupts running tasks and returns the list of tasks that never started; tasks must respond to interruption to actually stop. Use <code>awaitTermination(timeout, unit)</code> after <code>shutdown()</code> to wait for completion. Forgetting to shut a pool down keeps the JVM alive, because its core threads are non-daemon.</p></div>
+
+<h2>Why core pool size 2 and not 10 or 15?</h2>
+<p>Generally the pool's min and max size depend on various factors:</p>
+<ul>
+<li><b>CPU cores</b></li>
+<li><b>JVM memory</b></li>
+<li><b>Task nature</b>: CPU-intensive or I/O-intensive. For CPU-bound work use fewer threads (waiting time is low). For I/O-bound work use more threads, as they spend more time on a DB call and the other tasks should not wait.</li>
+<li><b>Concurrency requirement</b>: do we want high, medium or low concurrency?</li>
+<li><b>Memory required</b> to process a request</li>
+<li><b>Throughput</b> etc.</li>
+</ul>
+<p>And it's an <b>iterative process</b> to update the min and max values based on monitoring.</p>
+<div class="box extra"><strong>Rule of thumb</strong>
+<p>CPU-bound: threads &asymp; number of cores (or cores + 1). I/O-bound: cores &times; (1 + wait time / compute time).</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Order in which ThreadPoolExecutor uses core threads, queue and extra threads?</summary><p>Core threads first, then the queue, then extra threads up to max, then the rejection handler.</p></details>
+<details><summary>shutdown() vs shutdownNow()?</summary><p>shutdown finishes queued work and stops accepting new work; shutdownNow interrupts running tasks and returns the unstarted ones.</p></details>
+<details><summary>Why is an unbounded queue risky?</summary><p>maxPoolSize is never reached and the queue can grow until memory runs out.</p></details>
+<details><summary>How do you choose pool size?</summary><p>By task type (CPU vs I/O bound), cores, memory and measured throughput, then tune with monitoring.</p></details>
+</div>

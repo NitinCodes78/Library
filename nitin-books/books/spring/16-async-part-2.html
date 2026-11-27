@@ -1,0 +1,125 @@
+<h1>@Async: Part 2</h1>
+<p class="kicker">The rules that make @Async work, what happens to transactions, return types (Future, CompletableFuture) and exception handling.</p>
+
+<h2>Conditions for @Async to work</h2>
+<ol>
+<li><b>Call it from a different class.</b> If an <code>@Async</code> method is called from another method <b>in the same class</b>, the proxy is skipped, because internal method calls are not intercepted. It then runs on the caller's thread.</li>
+<li><b>The method must be public.</b> AOP interception works only on public methods.</li>
+</ol>
+<pre><code class="java">// WRONG: both methods in the same class, the proxy is bypassed
+@Component
+public class UserService {
+    public void getUser() {
+        System.out.println("inside getUserMethod: " + Thread.currentThread().getName());
+        asyncMethodTest();                       // plain call, no new thread
+    }
+
+    @Async
+    public void asyncMethodTest() {
+        System.out.println("inside asyncMethodTest: " + Thread.currentThread().getName());
+    }
+}
+// inside getUserMethod: http-nio-8080-exec-1
+// inside asyncMethodTest: http-nio-8080-exec-1     &lt;- same thread!</code></pre>
+<p><b>Correct:</b> put the <code>@Async</code> method in a <b>different class</b> and make it <b>public</b>.</p>
+
+<h2>@Async and transaction management</h2>
+<p>The transaction context is <b>thread-bound</b>. When <code>@Async</code> hands the work to another thread, the transaction does not travel with it.</p>
+<table>
+<tr><th>Case</th><th>What happens</th></tr>
+<tr><td><b>1.</b> A <code>@Transactional</code> caller calls an <code>@Async</code> method</td><td>The transaction context is <b>not transferred</b> from the caller thread to the new thread. The async method does not run inside the caller's transaction.</td></tr>
+<tr><td><b>2.</b> <code>@Async</code> and <code>@Transactional</code> on the same method</td><td>Use with care: a new thread is created and has its own transaction management, but the context is <b>not the same as the parent thread's</b>, so propagation will not behave as expected (REQUIRED will not join the caller's transaction).</td></tr>
+<tr><td><b>3.</b> <code>@Async</code> method calling a <code>@Transactional</code> method of another bean</td><td>That inner method gets its own, new transaction on the async thread. This is the clean pattern: async outside, transaction inside.</td></tr>
+</table>
+<div class="flow"><b>Caller thread (txn T1)</b><i>@Async</i><b>New thread (no T1)</b><i>calls</i><b>@Transactional method</b><i>starts its own</i><b>T2</b></div>
+
+<h2>Return type of an @Async method</h2>
+<p>An async method can return <code>void</code>, <code>Future</code> or <code>CompletableFuture</code>. (A plain <code>String</code> would be pointless: the caller would not have it yet.)</p>
+<h3>Using Future</h3>
+<pre><code class="java">@Component
+public class UserService {
+    @Async
+    public Future&lt;String&gt; performTaskAsync() {
+        return new AsyncResult&lt;&gt;("async task result");
+    }
+}
+
+@GetMapping(path = "/getUser")
+public String getUser() {
+    Future&lt;String&gt; result = userService.performTaskAsync();
+    String output = null;
+    try {
+        output = result.get();             // blocks until the task is done
+        System.out.println(output);
+    } catch (Exception e) {
+        System.out.println("some exception");
+    }
+    return output;
+}</code></pre>
+<table>
+<tr><th>Future method</th><th>Purpose</th></tr>
+<tr><td><code>boolean cancel(boolean mayInterruptIfRunning)</code></td><td>Attempts to cancel the task. Returns false if it cannot be cancelled (typically because it already completed), true otherwise.</td></tr>
+<tr><td><code>boolean isCancelled()</code></td><td>True if the task was cancelled before it completed.</td></tr>
+<tr><td><code>boolean isDone()</code></td><td>True if the task completed: by normal termination, an exception or cancellation.</td></tr>
+<tr><td><code>V get()</code></td><td>Waits if required for completion, then retrieves the result.</td></tr>
+<tr><td><code>V get(long timeout, TimeUnit unit)</code></td><td>Waits at most the given period; throws <code>TimeoutException</code> if the task is still not completed.</td></tr>
+</table>
+<h3>Using CompletableFuture (Java 8)</h3>
+<pre><code class="java">@Async
+public CompletableFuture&lt;String&gt; performTaskAsync() {
+    return CompletableFuture.completedFuture("async task result");
+}
+
+CompletableFuture&lt;String&gt; result = userService.performTaskAsync();
+String output = result.get();              // or chain: result.thenApply(...).thenAccept(...)</code></pre>
+<p>Prefer <code>CompletableFuture</code>: it can be composed without blocking (<code>thenApply</code>, <code>thenCombine</code>, <code>exceptionally</code>). <code>AsyncResult</code> is deprecated in recent Spring versions.</p>
+
+<h2>Exception handling</h2>
+<table>
+<tr><th>Method returns a Future / CompletableFuture</th><th>Method returns <code>void</code></th></tr>
+<tr><td>The exception is carried inside the future. The caller gets it when calling <code>get()</code> (wrapped in <code>ExecutionException</code>) and can catch it there.</td><td>The caller has already moved on, so there is nobody to catch the exception. It must be handled in the async thread.</td></tr>
+</table>
+<p>For a <code>void</code> async method there are two options:</p>
+<ol>
+<li><b>Handle it inside the async method itself</b> with try/catch.
+<pre><code class="java">@Async
+public void performTaskAsync() {
+    try {
+        int i = 0;
+        System.out.println(5 / i);
+    } catch (Exception e) {
+        // handle or log
+    }
+}</code></pre></li>
+<li><b>Implement a custom <code>AsyncUncaughtExceptionHandler</code></b> through <code>AsyncConfigurer</code>:
+<pre><code class="java">@Configuration
+public class MyAsyncConfig implements AsyncConfigurer {
+
+    @Override
+    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
+        return new CustomAsyncExceptionHandler();
+    }
+}
+
+class CustomAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
+    @Override
+    public void handleUncaughtException(Throwable ex, Method method, Object... params) {
+        System.out.println("in default Uncaught Exception method");
+    }
+}</code></pre></li>
+</ol>
+<p>If we do not handle it at all, Spring's default <code>SimpleAsyncUncaughtExceptionHandler</code> is used: it only <b>logs the error</b>.</p>
+<pre><code class="java">public class SimpleAsyncUncaughtExceptionHandler implements AsyncUncaughtExceptionHandler {
+    public void handleUncaughtException(Throwable ex, Method method, Object... params) {
+        if (logger.isErrorEnabled()) {
+            logger.error("Unexpected exception occurred invoking async method: " + method, ex);
+        }
+    }
+}</code></pre>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why does my @Async method run on the same thread?</summary><p>Self-invocation (called from the same class) or a non-public method, so the proxy never intercepts it. Also check that <code>@EnableAsync</code> is present.</p></details>
+<details><summary>Is the caller's transaction available inside an @Async method?</summary><p>No. Transactions are bound to a thread; the async thread has its own.</p></details>
+<details><summary>How do you handle exceptions from a void @Async method?</summary><p>try/catch inside, or an <code>AsyncUncaughtExceptionHandler</code>.</p></details>
+<details><summary>Future vs CompletableFuture?</summary><p>Future only allows blocking <code>get()</code>. CompletableFuture (Java 8) adds non-blocking composition and exception callbacks.</p></details>
+</div>

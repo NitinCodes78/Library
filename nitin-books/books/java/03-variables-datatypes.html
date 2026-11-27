@@ -1,0 +1,103 @@
+<h1>Variables and Data Types</h1>
+<p class="kicker">What a variable can hold, how Java stores it, and what happens when you convert between types.</p>
+
+<h2>Java variables</h2>
+<ul>
+<li>Variable names are <b>case-sensitive</b>.</li>
+<li>Java is a <b>statically typed</b> language: we have to define the data type, like <code>int var = 5;</code></li>
+<li>Java is a <b>strongly typed</b> language: each data type has a range, like <code>int</code> goes from <b>−2³¹ to 2³¹−1</b>.</li>
+<li>Names can contain Unicode letters and digits, and can start with <code>$</code>, <code>_</code> or a letter. Use <b>camelCase</b>.</li>
+</ul>
+
+<h2>Two families of types</h2>
+<div class="cols2">
+<div class="card"><h4>Primitive (8)</h4><p><code>byte</code>, <code>short</code>, <code>int</code>, <code>long</code>, <code>float</code>, <code>double</code>, <code>char</code>, <code>boolean</code></p></div>
+<div class="card"><h4>Reference / Non-primitive</h4><p>Hold a <b>reference</b> (an address) to an object in memory.</p><p>Class, Interface, Array, String</p></div>
+</div>
+
+
+<table>
+<tr><th>Type</th><th>Size</th><th>Default</th><th>Example</th></tr>
+<tr><td>byte</td><td>1 byte</td><td>0</td><td>range −128 to 127</td></tr>
+<tr><td>short</td><td>2 bytes</td><td>0</td><td></td></tr>
+<tr><td>int</td><td>4 bytes</td><td>0</td><td><code>int var = 5;</code></td></tr>
+<tr><td>long</td><td>8 bytes</td><td>0L</td><td><code>long x = 100L;</code></td></tr>
+<tr><td>float</td><td>4 bytes</td><td>0.0f</td><td><code>float v = .3f;</code></td></tr>
+<tr><td>double</td><td>8 bytes</td><td>0.0d</td><td></td></tr>
+<tr><td>char</td><td>2 bytes</td><td>'\u0000'</td><td></td></tr>
+<tr><td>boolean</td><td>JVM-dependent</td><td>false</td><td></td></tr>
+</table>
+<p class="sample">Sizes and defaults in this table are added by me for reference.</p>
+
+<h2>Default values</h2>
+<p>A variable gets a <b>default value only if it is a member of a class</b>. A local variable inside a method has no default, and using it is an <b>error</b>.</p>
+<pre><code class="java">class Employee {
+    byte var;              // class member variable → gets default 0
+    void func() {
+        byte var1;
+        System.out.println(var1);   // ERROR: variable might not have been initialized
+    }
+}</code></pre>
+
+<h2>float and double: be careful</h2>
+<pre><code class="java">long  x    = 100L;
+float val1 = .3f;
+float val2 = .1f;
+float val3 = val1 - val2;      // prints 0.20000002, not 0.2</code></pre>
+<p><code>float</code> and <code>double</code> follow the <b>IEEE 754</b> standard, which cannot represent most decimals exactly. <b>Never use them if you care about the exact decimal value.</b></p>
+<div class="box ex"><strong>How are they stored?</strong>
+<pre><code class="java">float a = .7f;
+System.out.println((double) a);    // 0.699999988... not exactly 0.7</code></pre>
+<p><b>Don't use them in industry for things like currency.</b> Use <code>BigDecimal</code> instead.</p></div>
+
+<h2>Type conversion</h2>
+<div class="cols3">
+<div class="card"><h4>1. Widening</h4><p>Automatic. Converts from <b>lower to higher</b>.</p><div class="flow"><b>byte</b><i></i><b>short</b><i></i><b>int</b><i></i><b>long</b></div></div>
+<div class="card"><h4>2. Down casting</h4><p>Explicit. Higher to lower, you write the cast.</p><div class="flow"><b>long</b><i></i><b>int</b><i></i><b>short</b><i></i><b>byte</b></div></div>
+<div class="card"><h4>3. Promotion</h4><p>Smaller types in an expression are lifted to <code>int</code> automatically.</p></div>
+</div>
+
+<h3>1. Widening (automatic)</h3>
+<pre><code class="java">int  var = 10;
+long varLong = var;       // converts automatically</code></pre>
+
+<h3>2. Down casting (explicit)</h3>
+<pre><code class="java">int  var  = 10;
+byte bVar = (byte) var;   // explicit cast</code></pre>
+<p>The byte range is <b>−128 to 127</b>. If <code>var = 129</code>, then <code>bVar</code> becomes <b>−127</b>: it goes around in a loop. Similarly <b>−126</b> if <code>var = 130</code>.</p>
+<div class="flow"><b>127</b><i>+1</i><b>−128</b><i>…</i><b>129 → −127</b></div>
+
+<h3>3. Promotion</h3>
+<pre><code class="java">byte var1 = 127;
+byte var2 = 10;
+var1 + var2;      // Java takes this expression as int, out of byte range</code></pre>
+<p>So <code>byte c = var1 + var2;</code> will not compile without a cast. The sum is an <code>int</code>.</p>
+
+<h2>Static variables</h2>
+<p>Static variables are <b>associated with the class</b>. You can access them directly <b>without an object</b>.</p>
+<pre><code class="java">class Employee {
+    int var1;
+    static int var2;     // class variable: not given to objects
+}
+// Employee.var2</code></pre>
+<p>Make two objects, <code>obj1</code> and <code>obj2</code>. <b>Each object has its own copy of <code>var1</code></b>, but for <code>var2</code> there is <b>just one copy</b>, common to both objects.</p>
+<div class="mem2"><div class="obj">obj1<br><small>var1</small></div><div class="shared">one copy (static)<br><b>var2</b></div><div class="obj">obj2<br><small>var1</small></div></div>
+<p><code>Employee.var2</code> ✓ is the way to access it. Java also lets you write <code>obj1.var2</code>: it compiles (with a warning) and still points to the one shared copy, but it is <b>bad style</b> because it looks as if each object had its own. Always write <code>Employee.var2</code>.</p>
+
+
+<h2>Reference types</h2>
+<pre><code class="java">Employee empObject = new Employee();</code></pre>
+<p><code>empObject</code> is a <b>reference to the space created in heap memory</b>. If another variable is given the same reference, it also refers to the same space.</p>
+<div class="mem2"><div class="obj">empObject<br><small>holds address (like 41f12369)</small></div><div class="shared">Heap<br><b>Employee object</b></div></div>
+<p>So when you pass it to a method, the method changes the <b>same object</b>:</p>
+<pre><code class="java">void modify(Employee employee) {
+    employee.empID = 20;       // the caller's object changes too
+}</code></pre>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why is Java called strongly typed?</summary><p>Every variable has a declared type with a fixed range, and the compiler checks types strictly. You cannot silently put a double into an int.</p></details>
+<details><summary>What is the default value of an int field? Of a local int?</summary><p>A field defaults to 0. A local variable has no default; using it before assigning is a compile error.</p></details>
+<details><summary>Why does (byte) 129 give -127?</summary><p>129 does not fit in 8 bits. The cast keeps only the lowest 8 bits, which as a signed byte is −127. It wraps around.</p></details>
+<details><summary>Why should you not use float or double for money?</summary><p>They cannot represent most decimal fractions exactly (IEEE 754), so errors creep in. Use <code>BigDecimal</code>.</p></details>
+<details><summary>Is Java pass by value or pass by reference?</summary><p>Always pass by value. For objects, the value copied is the reference, so the method can change the object's contents, but cannot make the caller's variable point to a different object.</p></details>
+</div>

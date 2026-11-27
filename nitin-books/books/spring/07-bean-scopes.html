@@ -1,0 +1,115 @@
+<h1>Bean Scopes</h1>
+<p class="kicker">Singleton, Prototype, Request and Session: how many objects Spring creates and when, plus the classic "request bean inside a singleton" trap.</p>
+
+<p>A <b>scope</b> decides how many instances of a bean Spring creates and how long each one lives. The four you must know:</p>
+<div class="cols2">
+<div class="card"><h4>Singleton</h4><p>One instance per IoC container. <b>Default.</b></p></div>
+<div class="card"><h4>Prototype</h4><p>A new instance every time the bean is requested.</p></div>
+<div class="card"><h4>Request</h4><p>A new instance for every HTTP request.</p></div>
+<div class="card"><h4>Session</h4><p>A new instance for every HTTP session.</p></div>
+</div>
+
+<h2>Singleton</h2>
+<ul>
+<li>The <b>default</b> scope.</li>
+<li>Only <b>one instance</b> is created per IoC container.</li>
+<li><b>Eagerly initialised</b>: the object is created at application startup.</li>
+</ul>
+<pre><code class="java">@Component
+public class User {
+    public User() { System.out.println("User initialization"); }
+    public void init() { System.out.println("User object hashCode: " + this.hashCode()); }
+}
+
+@RestController
+@RequestMapping(value = "/api/")
+public class TestController1 {
+    @Autowired User user;
+    ...
+}
+@RestController
+public class TestController2 {
+    @Autowired User user;
+    ...
+}</code></pre>
+<p>At startup the log shows "User initialization" <b>once</b>, then the controllers are created. Both controllers print the <b>same <code>hashCode</code></b> for <code>User</code>: they share one object.</p>
+
+<h2>Prototype</h2>
+<ul>
+<li>A <b>new object is created each time</b> the bean is needed.</li>
+<li><b>Lazily initialised</b>: created only when required, not at startup.</li>
+</ul>
+<pre><code class="java">@Component
+@Scope(value = "prototype")
+public class Student {
+    public Student() { System.out.println("Student instance initialization"); }
+}
+
+@RestController
+public class TestController1 {
+    @Autowired User user;         // singleton
+    @Autowired Student student;   // prototype
+}</code></pre>
+<p>Injected into two different controllers, <code>Student</code> prints <b>different hash codes</b>, while <code>User</code> stays the same. Each injection point gets its own object.</p>
+
+<h2>Request</h2>
+<ul>
+<li>A <b>new object is created for each HTTP request</b>.</li>
+<li>Lazily initialised, and available only inside a web application.</li>
+</ul>
+<pre><code class="java">@Component
+@Scope(value = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class User {
+    public User() { System.out.println("User initialization"); }
+}</code></pre>
+<p>Call <code>/api/fetchUser</code> twice: the log prints "User initialization" twice, with two different hash codes, one per request.</p>
+
+<div class="box extra"><strong>Why the <code>proxyMode</code>?</strong>
+<p>Suppose the request-scoped <code>User</code> is injected into a <b>singleton</b> controller <b>without</b> <code>proxyMode</code>. Spring creates a request-scoped bean only when an <b>active HTTP request</b> exists. A singleton is created eagerly at startup, when no request is active on the thread, so the application <b>fails to start</b> ("Scope 'request' is not active for the current thread").</p>
+<p>With <code>proxyMode = ScopedProxyMode.TARGET_CLASS</code> Spring injects a <b>proxy</b> into the singleton instead. On every call the proxy looks up the real bean of the current request and forwards the call to it. This is the general fix for injecting a shorter-lived bean (request, session, prototype) into a longer-lived one.</p></div>
+<div class="flow"><b>Singleton controller</b><i>holds one</i><b>Scoped proxy</b><i>per call, finds the bean of the current request</i><b>Real request bean</b></div>
+
+<h2>Session</h2>
+<ul>
+<li>A <b>new object is created for each HTTP session</b>.</li>
+<li>Lazily initialised: the session (and the bean) is created when the user first accesses an endpoint.</li>
+<li>It <b>stays active until the session expires</b> or is invalidated.</li>
+</ul>
+<pre><code class="java">@Component
+@Scope(value = "session", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class User { ... }
+
+@GetMapping(path = "/fetchUser")
+public ResponseEntity&lt;String&gt; fetchUser() { ... }
+
+@GetMapping(path = "/logout")
+public ResponseEntity&lt;String&gt; logout(HttpServletRequest request) {
+    HttpSession session = request.getSession();
+    session.invalidate();               // ends the session: the next call gets a new bean
+    return ResponseEntity.status(HttpStatus.OK).body("");
+}</code></pre>
+<p>Calling <code>/fetchUser</code> repeatedly from the same browser session gives the same <code>User</code> hash code. After <code>/logout</code> invalidates the session, the next call creates a new one.</p>
+
+<h2>Summary</h2>
+<table>
+<tr><th>Scope</th><th>Instances</th><th>Created</th><th>Needs a web app</th></tr>
+<tr><td>singleton</td><td>1 per container</td><td>eagerly, at startup</td><td>No</td></tr>
+<tr><td>prototype</td><td>1 per request for the bean</td><td>lazily, when needed</td><td>No</td></tr>
+<tr><td>request</td><td>1 per HTTP request</td><td>lazily</td><td>Yes</td></tr>
+<tr><td>session</td><td>1 per HTTP session</td><td>lazily</td><td>Yes</td></tr>
+</table>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Also exist: <b>application</b> (one per ServletContext) and <b>websocket</b> scope.</li>
+<li>A singleton is <b>one object shared by all threads</b>, so it must be stateless (or thread-safe). Keep per-user state in request or session scope, or outside the bean.</li>
+<li>Spring does not call <code>@PreDestroy</code> on <b>prototype</b> beans: after creating one it stops tracking it.</li>
+<li>Injecting a prototype into a singleton gives you the <b>same prototype object forever</b> (it is injected once). Use <code>ObjectProvider&lt;Student&gt;</code>, <code>@Lookup</code> or a scoped proxy to get a fresh one each time.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Is a singleton bean thread-safe?</summary><p>No. There is one shared instance, so Spring gives no thread-safety; keep the bean stateless or synchronise carefully.</p></details>
+<details><summary>Singleton bean in Spring vs the Singleton design pattern?</summary><p>Spring's singleton is one instance per container (per ApplicationContext), the pattern is one instance per JVM/classloader.</p></details>
+<details><summary>What if a prototype bean is injected into a singleton?</summary><p>It is injected only once, so it behaves like a singleton. Use <code>ObjectProvider</code>, <code>@Lookup</code> or <code>proxyMode</code>.</p></details>
+<details><summary>Why did my request-scoped bean fail at startup?</summary><p>No HTTP request was active when the singleton was created. Add a scoped proxy.</p></details>
+</div>

@@ -1,0 +1,115 @@
+<h1>Controller Layer Annotations</h1>
+<p class="kicker">@Controller, @RestController, @RequestMapping, @RequestParam, @PathVariable, @RequestBody and ResponseEntity: how a request reaches your method.</p>
+
+<h2>1. @Controller</h2>
+<p>Indicates that the class is responsible for <b>handling incoming HTTP requests</b>. It is a specialised <code>@Component</code> (declared with <code>@Target(TYPE)</code>, <code>@Retention(RUNTIME)</code>), so component scanning picks it up.</p>
+
+<h2>2. @RestController</h2>
+<div class="flow"><b>@RestController</b><i>=</i><b>@Controller</b><i>+</i><b>@ResponseBody</b></div>
+
+<h2>3. @ResponseBody</h2>
+<ul>
+<li>Says that the <b>return value of the controller method is serialised into the HTTP response body</b> (JSON by default).</li>
+<li>Without it, in a <code>@Controller</code>, Spring treats the returned String as a <b>view name</b> and tries to resolve and render that view.</li>
+</ul>
+
+<h2>4. @RequestMapping</h2>
+<p>Maps a request to a class or method. Its main attributes:</p>
+<ol>
+<li><b><code>value</code> / <code>path</code></b>: both are the same, the URL pattern.</li>
+<li><b><code>method</code></b>: the HTTP method (<code>RequestMethod.GET</code> ...).</li>
+<li><b><code>consumes</code>, <code>produces</code></b>: the media types accepted in the request and produced in the response.</li>
+<li><code>params</code>, <code>headers</code>: map only when a given parameter or header is present.</li>
+</ol>
+<pre><code class="java">@RequestMapping(path = "/fetchUser", method = RequestMethod.GET,
+                consumes = "application/json", produces = "application/json")</code></pre>
+<p><code>@RequestMapping</code> is itself annotated with <code>@Mapping</code> and works on both <b>types and methods</b>. The shortcuts <code>@GetMapping</code>, <code>@PostMapping</code>, <code>@PutMapping</code>, <code>@DeleteMapping</code> and <code>@PatchMapping</code> are just <code>@RequestMapping</code> with the method pre-set.</p>
+
+<h2>5. @RequestParam</h2>
+<p>Binds a <b>query parameter</b> to a controller method parameter.</p>
+<pre><code>http://localhost:8080/api/fetchUser?firstName=SHRAYANSH&amp;lastName=JAIN&amp;age=32</code></pre>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+
+    @GetMapping(path = "/fetchUser")
+    public String fetchUser(@RequestParam(name = "firstName") String firstName,
+                            @RequestParam(name = "lastName", required = false) String lastName,
+                            @RequestParam(name = "age") int age) {
+        return "fetching user details based on first name = " + firstName
+               + ", lastName = " + lastName + " and age = " + age;
+    }
+}</code></pre>
+<p>The framework automatically converts the request parameter's <b>string</b> value to the target type. Supported:</p>
+<ol>
+<li><b>Primitive types</b>: int, long, float, double, boolean ...</li>
+<li><b>Wrapper classes</b>: Integer, Long, Float, Double, Boolean ...</li>
+<li><b>String</b>: request parameters are inherently strings.</li>
+<li><b>Enums</b>.</li>
+<li><b>Custom object types</b>: through a registered <code>PropertyEditor</code> (or a <code>Converter</code>).</li>
+</ol>
+<p>Use <code>required = false</code> for an optional parameter, and <code>defaultValue</code> to give it a fallback.</p>
+
+<h3>Customising binding with a PropertyEditor</h3>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+
+    @InitBinder
+    protected void initBinder(WebDataBinder binder) {
+        binder.registerCustomEditor(String.class, "firstName", new FirstNamePropertyEditor());
+    }
+
+    @GetMapping(path = "/fetchUser")
+    public String fetchUser(@RequestParam(name = "firstName") String firstName) { ... }
+}
+
+public class FirstNamePropertyEditor extends PropertyEditorSupport {
+    @Override
+    public void setAsText(String text) throws IllegalArgumentException {
+        setValue(text.trim().toLowerCase());     // trims and lower-cases the incoming name
+    }
+}</code></pre>
+
+<h2>6. @PathVariable</h2>
+<p>Extracts a value from the <b>path of the URL</b> and binds it to a method parameter.</p>
+<pre><code class="java">@GetMapping(path = "/fetchUser/{firstName}")
+public String fetchUser(@PathVariable(value = "firstName") String firstName) {
+    return "fetching and returning user details based on first name = " + firstName;
+}
+// GET /api/fetchUser/Shrayansh</code></pre>
+<div class="box extra"><strong>@RequestParam vs @PathVariable</strong>
+<p><code>@PathVariable</code> identifies <b>a resource</b> (<code>/users/42</code>). <code>@RequestParam</code> filters or tweaks a request (<code>/users?city=Pune&amp;page=2</code>).</p></div>
+
+<h2>7. @RequestBody</h2>
+<p>Binds the <b>body of the HTTP request</b> (typically JSON) to a Java object, using Jackson.</p>
+<pre><code class="java">public class User {
+    @JsonProperty("user_name")          // JSON key differs from the field name
+    String username;
+    String email;
+    // getters and setters
+}
+
+@PostMapping(path = "/saveUser")
+public String saveUser(@RequestBody User user) {
+    return "User created " + user.getUsername() + ":" + user.getEmail();
+}</code></pre>
+<pre><code>curl --location --request POST 'http://localhost:8080/api/saveUser' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{ "user_name": "Shrayansh", "email": "sjxyztest@gmail.com" }'</code></pre>
+
+<h2>8. ResponseEntity</h2>
+<p>Represents the <b>entire HTTP response</b>: status, headers and body.</p>
+<pre><code class="java">@GetMapping(path = "/fetchUser")
+public ResponseEntity&lt;String&gt; fetchUserDetails(@RequestParam(value = "firstName") String firstName) {
+    String output = "fetched User details of " + firstName;
+    return ResponseEntity.status(HttpStatus.OK).body(output);
+}</code></pre>
+<p>More on status codes in the chapter <i>ResponseEntity and Status Codes</i>.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>@Controller vs @RestController?</summary><p>@RestController = @Controller + @ResponseBody on every method, so return values are written to the body (JSON). A plain @Controller returns view names (for server-rendered pages) unless you add @ResponseBody.</p></details>
+<details><summary>@RequestParam vs @PathVariable vs @RequestBody?</summary><p>Query string value vs a segment of the URL path vs the whole request body deserialised from JSON.</p></details>
+<details><summary>What happens if a required @RequestParam is missing?</summary><p>Spring throws <code>MissingServletRequestParameterException</code> and responds with 400 Bad Request.</p></details>
+<details><summary>What is the default JSON library and how do you rename a field?</summary><p>Jackson. Use <code>@JsonProperty("name")</code> on the field or getter.</p></details>
+</div>

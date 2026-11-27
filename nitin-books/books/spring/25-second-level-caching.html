@@ -1,0 +1,176 @@
+<h1>JPA Second-Level Caching (Part 4)</h1>
+<p class="kicker">Share cached entities across sessions: setup with Ehcache, regions, and the four concurrency strategies.</p>
+
+<h2>From first level to second level</h2>
+<p>From the previous chapter we know that for each HTTP request a different <code>EntityManager</code> (session) is created, and each has its <b>own persistence context</b> (first-level cache). Data cached in one session is invisible to the next.</p>
+<div class="flow"><b>1st POST call</b><i>EntityManager 1</i><b>own L1 cache</b><b>2nd GET call</b><i>EntityManager 2</i><b>own L1 cache</b><b>3rd GET call</b><i>EntityManager 3</i><b>own L1 cache</b></div>
+<p>With <b>second-level (L2) caching</b> one cache sits <b>underneath all sessions</b> (per EntityManagerFactory): once a GET loads an entity from the DB, the next GET in any other session finds it in the L2 cache and does not touch the DB.</p>
+<div class="diag">
+<div class="row"><div class="cb sm">Session 1<br><small>L1 cache</small></div><div class="cb sm">Session 2<br><small>L1 cache</small></div><div class="cb sm">Session 3<br><small>L1 cache</small></div></div>
+<div class="row"><div class="cb wide">Second-level cache (shared across sessions)</div></div>
+<div class="row"><div class="cb wide">Database</div></div>
+</div>
+
+<h2>The happy flow</h2>
+<pre><code>pom.xml
+&lt;dependency&gt;
+    &lt;groupId&gt;org.ehcache&lt;/groupId&gt;
+    &lt;artifactId&gt;ehcache&lt;/artifactId&gt;
+    &lt;version&gt;3.10.8&lt;/version&gt;
+    &lt;classifier&gt;jakarta&lt;/classifier&gt;       (needed with Spring Boot 3 / Hibernate 6)
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.hibernate.orm&lt;/groupId&gt;
+    &lt;artifactId&gt;hibernate-jcache&lt;/artifactId&gt;
+    &lt;version&gt;6.5.2.Final&lt;/version&gt;        (match the Hibernate version Boot uses)
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;javax.cache&lt;/groupId&gt;
+    &lt;artifactId&gt;cache-api&lt;/artifactId&gt;
+    &lt;version&gt;1.1.1&lt;/version&gt;
+&lt;/dependency&gt;
+
+application.properties
+spring.jpa.properties.hibernate.cache.use_second_level_cache=true
+spring.jpa.properties.hibernate.cache.region.factory_class=org.hibernate.cache.jcache.JCacheRegionFactory
+spring.jpa.properties.hibernate.javax.cache.provider=org.ehcache.jsr107.EhcacheCachingProvider
+logging.level.org.hibernate.cache.spi=DEBUG</code></pre>
+<pre><code class="java">@Entity
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE, region = "userDetailsCache")
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    private String email;
+    // constructors, getters and setters
+}
+
+@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+    @Autowired UserDetailsService userDetailsService;
+
+    @PostMapping(path = "/user")
+    public UserDetails saveUser(@RequestBody UserDetails userDetails) {
+        return userDetailsService.saveUser(userDetails);
+    }
+
+    @GetMapping("/user/{id}")
+    public UserDetails getUser(@PathVariable Long id) {
+        return userDetailsService.findByID(id);
+    }
+}
+
+@Service
+public class UserDetailsService {
+    @Autowired UserDetailsRepository userDetailsRepository;
+
+    public UserDetails saveUser(UserDetails user) { return userDetailsRepository.save(user); }
+    public UserDetails findByID(Long primaryKey) { return userDetailsRepository.findById(primaryKey).get(); }
+}</code></pre>
+<p>What the logs show:</p>
+<ol>
+<li><b>Insert (POST):</b> data goes <b>directly into the DB</b>; no cache insertion or validation happens.</li>
+<li><b>First GET:</b> JPA checks the cache. It is a <b>cache miss</b>, so it fetches from the DB (a SELECT is printed) and <b>puts it into the cache</b>.</li>
+<li><b>Second GET</b> (even from a different session): a <b>cache hit</b>; Hibernate's DEBUG log prints <code>Cache hit: region = "userDetailsCache"</code> and no SQL is fired.</li>
+</ol>
+
+<h2>1. Why three dependencies?</h2>
+<table>
+<tr><th>Dependency</th><th>Role</th></tr>
+<tr><td><code>ehcache</code></td><td>The <b>core implementation</b> of second-level caching.</td></tr>
+<tr><td><code>hibernate-jcache</code></td><td>The <b>Hibernate-specific</b> caching logic. Because we annotate entities with <code>@Cache</code> and a <code>CacheConcurrencyStrategy</code>, specific logic must run, and this library provides it.</td></tr>
+<tr><td><code>cache-api</code> (JCache, JSR-107)</td><td>The <b>interface</b> Hibernate talks to. This gives loose coupling: you can swap Ehcache for another JCache-compliant provider (Caffeine, Hazelcast ...) without changing code.</td></tr>
+</table>
+<div class="flow"><b>Hibernate interfaces</b><i>hibernate-jcache</i><b>JCache APIs</b><i>provider</i><b>Ehcache / Caffeine / Hazelcast</b></div>
+
+<h2>2. application.properties and regions</h2>
+<ul>
+<li><code>hibernate.cache.use_second_level_cache=true</code> turns it on.</li>
+<li><code>hibernate.cache.region.factory_class=...JCacheRegionFactory</code> tells Hibernate to use <code>hibernate-jcache</code> to manage caching (you may also give the Ehcache factory class directly, bypassing JCache).</li>
+<li><code>javax.cache.provider</code> names the JCache provider (<code>EhcacheCachingProvider</code>).</li>
+</ul>
+<h3>Region</h3>
+<p>A <b>region</b> is a <b>logical grouping of cached data</b>. For each region (group) you can apply a different caching strategy: eviction policy, TTL, cache size, concurrency strategy and so on. That gives granular control over cached <b>entities, collections or query results</b>.</p>
+<pre><code class="java">@Entity
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE, region = "userDetailsCache")
+public class UserDetails { ... }
+
+@Entity
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE, region = "orderDetailsCache")
+public class OrderDetails { ... }</code></pre>
+<p>The regions are then configured in a file in <code>src/main/resources</code>, <b>ehcache.xml</b> (Ehcache 3 format), pointed to with <code>spring.jpa.properties.hibernate.javax.cache.uri=classpath:ehcache.xml</code>:</p>
+<pre><code>&lt;config xmlns="http://www.ehcache.org/v3"&gt;
+    &lt;cache alias="userDetailsCache"&gt;
+        &lt;expiry&gt;&lt;ttl unit="seconds"&gt;60&lt;/ttl&gt;&lt;/expiry&gt;
+        &lt;heap unit="entries"&gt;100&lt;/heap&gt;
+    &lt;/cache&gt;
+    &lt;cache alias="orderDetailsCache"&gt;
+        &lt;expiry&gt;&lt;ttl unit="seconds"&gt;200&lt;/ttl&gt;&lt;/expiry&gt;
+        &lt;heap unit="entries"&gt;1000&lt;/heap&gt;
+    &lt;/cache&gt;
+&lt;/config&gt;</code></pre>
+<p>So <code>userDetailsCache</code> holds at most 100 entries, each living 60 seconds, and <code>orderDetailsCache</code> up to 1000 entries for 200 seconds. (An older Ehcache 2 file used <code>maxElementsInMemory</code> and <code>evictionStrategy</code> for the same ideas.)</p>
+
+<h2>3. CacheConcurrencyStrategy</h2>
+<table>
+<tr><th>Strategy</th><th>Use</th></tr>
+<tr><td><code>READ_ONLY</code></td><td>Static data that never changes</td></tr>
+<tr><td><code>READ_WRITE</code></td><td>Read and update with safe locking (strong consistency)</td></tr>
+<tr><td><code>NONSTRICT_READ_WRITE</code></td><td>Read-heavy, small risk of stale data is fine</td></tr>
+<tr><td><code>TRANSACTIONAL</code></td><td>Full transactional cache (needs a JTA-capable setup)</td></tr>
+</table>
+
+<h3>1. READ_ONLY</h3>
+<ul>
+<li>Good for <b>static data</b> that does not require updates.</li>
+<li>If you try to update the entity, an exception comes: <code>UnsupportedOperationException: Can't update readonly object</code> (thrown from <code>EntityReadOnlyAccess.update</code>), and the API returns 500.</li>
+</ul>
+<pre><code class="java">@Entity
+@Cache(usage = CacheConcurrencyStrategy.READ_ONLY, region = "userDetailsCache")
+public class UserDetails { ... }
+
+// PUT /api/user/1 with {"name":"sj_updated", ...}  ->  500 Internal Server Error</code></pre>
+
+<h3>2. READ_WRITE</h3>
+<ul>
+<li>During <b>read</b>, a <b>shared lock</b> is taken: other reads may also take a shared lock, but no write.</li>
+<li>During <b>update</b>, an <b>exclusive lock</b> is taken: no other read or write is allowed.</li>
+</ul>
+<ol>
+<li>Update: transaction begins.</li>
+<li>Acquire a lock on the cache entry (prevents stale reads: no read or write allowed) and mark the cache data <b>invalidated</b>.</li>
+<li>On <b>commit</b>: update the cache with the latest data, remove the invalidate flag and release the lock. On <b>rollback</b>: the old data stays and the lock is released.</li>
+<li>A read that misses the cache goes to the DB and puts the result back into the cache.</li>
+</ol>
+<div class="flow"><b>Insert</b><i>straight to DB</i><b>Get 1: miss</b><i>read DB, put in cache</i><b>Update</b><i>lock cache, update DB and cache on success</i><b>Get 2: hit</b><i>no DB</i><b>done</b></div>
+
+<h3>3. NONSTRICT_READ_WRITE</h3>
+<ul>
+<li>During read: <b>no lock</b> at all.</li>
+<li>During update: after the transaction commits, the cache entry is marked <b>invalidated</b>; it is <b>not</b> updated with fresh data, and the next read reloads it.</li>
+<li>Good for <b>read-heavy</b> applications.</li>
+<li>If an update and a read happen in parallel, the read may see <b>stale data</b>.</li>
+</ul>
+
+<h3>4. TRANSACTIONAL</h3>
+<ul>
+<li>Acquires both a <b>read lock</b> and a <b>write lock</b>.</li>
+<li>Updates the cache after the transaction commits successfully.</li>
+<li>Any other <b>read</b> while the cache is locked goes <b>directly to the DB</b>; any other <b>write</b> waits in a queue.</li>
+</ul>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>L2 caching works at the <b>entity-by-id</b> level. Collections need <code>@Cache</code> on the collection field; query results need <code>@Cacheable</code> on the query plus <code>hibernate.cache.use_query_cache=true</code>.</li>
+<li>Remember: it is per application instance (in-JVM). With several instances, each has its own cache, so you need a distributed provider (Hazelcast, Infinispan, Redis-based) or short TTLs.</li>
+<li>Updates made by raw SQL or other applications bypass Hibernate, so cached entities can go stale until the TTL expires.</li>
+<li>Use it for data that is read often and changes rarely (countries, configurations, catalogues).</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>First-level vs second-level cache?</summary><p>L1: per session/EntityManager, always on, automatic. L2: shared across sessions of one SessionFactory, optional, provider-backed, configured per entity/region.</p></details>
+<details><summary>Which concurrency strategy for which data?</summary><p>READ_ONLY for static data, NONSTRICT_READ_WRITE for read-heavy tolerant data, READ_WRITE when staleness is not acceptable, TRANSACTIONAL when you need JTA-level consistency.</p></details>
+<details><summary>What is a cache region?</summary><p>A named cache area with its own TTL, size and eviction policy.</p></details>
+</div>

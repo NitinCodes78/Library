@@ -1,0 +1,93 @@
+<h1>Functional Interfaces and Lambdas</h1>
+<p class="kicker">One abstract method, and a short way to implement it.</p>
+
+<h2>Functional interface</h2>
+<ol>
+<li>If an interface contains <b>only 1 abstract method</b>, it is a functional interface (it <b>can have other methods</b>: default and static).</li>
+<li>Also known as <b>SAM</b> (Single Abstract Method) interface.</li>
+<li>The <code>@FunctionalInterface</code> annotation can be used at the top of the interface (<b>optional</b>). We get a <b>compilation error</b> if we try to add more than 1 abstract method.</li>
+</ol>
+<pre><code class="java">@FunctionalInterface
+public interface Bird {
+    void canFly(String val);                 // the one abstract method
+
+    static void canEat() { }                 // static: fine, not abstract
+    String toString();                       // Object class method: not counted as abstract
+}</code></pre>
+<p>The <code>toString()</code> line is an <b>Object class method</b> (like <code>equals()</code> etc. in <code>Object</code>), so <b>there is no need to provide the implementation</b> in the child class and these <b>are not considered abstract</b>, because by default every class extends <code>Object</code>.</p>
+
+<h2>Lambda expression</h2>
+<p>A way to <b>implement a functional interface</b>. It can also be implemented with the <code>implements</code> keyword or an anonymous class like any other interface, but the lambda expression is made for implementing functional interfaces.</p>
+
+<h3>Using an anonymous class</h3>
+<pre><code class="java">@FunctionalInterface
+public interface Bird {
+    void canFly(String val);
+}
+
+Bird eagle = new Bird() {
+    @Override
+    public void canFly(String val) {
+        System.out.println("Eagle flies: " + val);
+    }
+};
+eagle.canFly("high");</code></pre>
+
+<h3>Using a lambda</h3>
+<pre><code class="java">Bird eagle = (val) -&gt; System.out.println("Eagle flies: " + val);
+eagle.canFly("high");</code></pre>
+<div class="diag"><div class="row"><div class="cb wide">(val) &nbsp;-&gt;&nbsp; System.out.println(val)<br><small>parameters &nbsp;&nbsp; arrow &nbsp;&nbsp; body</small></div></div></div>
+<p>The compiler already knows the interface's single method, so you only write <b>parameters</b> and <b>body</b>. No class name, no method name, no <code>@Override</code>.</p>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>One parameter: brackets optional (<code>val -&gt; ...</code>). No parameter: <code>() -&gt; ...</code>.</li>
+<li>Single-statement body needs no braces and no <code>return</code>. A block body uses <code>{ ... return x; }</code>.</li>
+<li>Built-in functional interfaces: <code>Runnable</code>, <code>Comparator</code>, <code>Predicate</code>, <code>Function</code>, <code>Consumer</code>, <code>Supplier</code>.</li>
+</ul></div>
+
+<h3>Shortening the syntax</h3>
+<p>Since there is only <b>one abstract method</b> in a functional interface, we can shorten the anonymous-class syntax: <b>no need to tell which method to override</b>.</p>
+<pre><code class="java">Bird eagleObject = (String value) -&gt; {
+    System.out.println("Eagle impl..");
+};                                      // no need for curly braces if there is only one line
+eagleObject.canFly("Vertical");</code></pre>
+
+<h2>Built-in functional interfaces</h2>
+<p>All live in the package <code>java.util.function</code>.</p>
+<table>
+<tr><th>Interface</th><th>Takes</th><th>Returns</th><th>Method</th></tr>
+<tr><td><b>Consumer&lt;T&gt;</b></td><td>one input</td><td>nothing</td><td><code>void accept(T t)</code></td></tr>
+<tr><td><b>Supplier&lt;T&gt;</b></td><td>nothing</td><td>a result</td><td><code>T get()</code></td></tr>
+<tr><td><b>Function&lt;T,R&gt;</b></td><td>one argument</td><td>a result</td><td><code>R apply(T t)</code></td></tr>
+<tr><td><b>Predicate&lt;T&gt;</b></td><td>one argument</td><td><code>boolean</code></td><td><code>boolean test(T t)</code></td></tr>
+</table>
+<div class="box ex"><strong>Consumer</strong>: an operation that accepts a single input and returns no result.
+<pre><code class="java">Consumer&lt;Integer&gt; loggingObject = (Integer val) -&gt; {
+    if (val &gt; 10) System.out.println("Value is greater than 10");
+};
+loggingObject.accept(11);</code></pre></div>
+<div class="box ex"><strong>Supplier</strong>: supplies a result, accepts no input.
+<pre><code class="java">Supplier&lt;String&gt; isEvenNumber = () -&gt; "this is ...";
+isEvenNumber.get();</code></pre></div>
+<div class="box ex"><strong>Function</strong>: accepts one argument, processes it and produces a result.
+<pre><code class="java">Function&lt;Integer, String&gt; intToStr = (Integer num) -&gt; {
+    return num.toString();
+};
+intToStr.apply(64);</code></pre></div>
+<div class="box ex"><strong>Predicate</strong>: a function that accepts one argument and returns a boolean.
+<pre><code class="java">Predicate&lt;Integer&gt; isEven = n -&gt; n % 2 == 0;
+isEven.test(4);     // true</code></pre></div>
+
+<h2>Functional interface and inheritance</h2>
+<h4>Use case 1: a functional interface extending a non-functional interface</h4>
+<p>With <code>@FunctionalInterface</code> this gives a <b>compilation error</b> if the parent already has an abstract method: the parent's abstract method is carried to the child, so the child basically has 2. It works fine if the parent has only <b>default</b> methods (implementation already provided) or no abstract method at all.</p>
+<h4>Use case 2: a normal interface extending a functional interface</h4>
+<p>Works fine ✓.</p>
+<h4>Use case 3: a functional interface extending a functional interface</h4>
+<p>If both have an abstract method ✗. But if both have an abstract method with the <b>same name</b> ✓ (it is one and the same method).</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Can a functional interface have default and static methods?</summary><p>Yes, any number. Only the count of <i>abstract</i> methods matters: exactly one.</p></details>
+<details><summary>Why aren't equals() or toString() counted?</summary><p>Every implementing class already inherits them from <code>Object</code>, so no one needs to implement them.</p></details>
+<details><summary>Lambda vs anonymous class?</summary><p>A lambda works only for functional interfaces, has no own <code>this</code> (it refers to the enclosing class) and doesn't create a separate class file. An anonymous class can implement any interface or abstract class, and has its own <code>this</code>.</p></details>
+</div>

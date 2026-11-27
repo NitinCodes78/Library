@@ -1,0 +1,122 @@
+<h1>ResponseEntity and HTTP Status Codes</h1>
+<p class="kicker">Control status, headers and body of the response, and know exactly which status code to return when.</p>
+
+<h2>ResponseEntity</h2>
+<p><code>ResponseEntity</code> represents the <b>entire HTTP response</b>: status code, headers and body. It is built with the <b>Builder pattern</b>: <code>status(...)</code> and <code>headers(...)</code> return a builder, and the <b>body must be last</b> because the <code>body(...)</code> call returns the final <code>ResponseEntity</code>.</p>
+<pre><code class="java">public static BodyBuilder status(HttpStatusCode status) { ... }
+
+BodyBuilder headers(HttpHeaders headers);
+&lt;T&gt; ResponseEntity&lt;T&gt; body(T body);
+&lt;T&gt; ResponseEntity&lt;T&gt; build();          // when there is no body</code></pre>
+<pre><code class="java">@GetMapping(path = "/get-user")
+public ResponseEntity&lt;User&gt; getUser() {
+    User user = new User("XYZ", 28);
+    HttpHeaders headers = new HttpHeaders();
+    headers.add("My-Header1", "SomeValue1");
+    headers.add("My-Header2", "SomeValue2");
+    return ResponseEntity.status(HttpStatus.OK).headers(headers).body(user);
+}
+
+// no body wanted: use build()
+@GetMapping(path = "/get-user")
+public ResponseEntity&lt;Void&gt; getUser() {
+    HttpHeaders headers = new HttpHeaders();
+    headers.add("My-Header1", "SomeValue1");
+    return ResponseEntity.status(HttpStatus.OK).headers(headers).build();
+}</code></pre>
+<p>Shortcuts: <code>ResponseEntity.ok(body)</code>, <code>ResponseEntity.created(uri).body(x)</code>, <code>ResponseEntity.noContent().build()</code>, <code>ResponseEntity.notFound().build()</code>.</p>
+
+<h3>Returning a POJO directly: default 200 OK</h3>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+
+    @GetMapping(path = "/get-user")
+    public User getUser() {
+        return new User("XYZ", 28);        // serialised to JSON, status 200 OK by default
+    }
+}</code></pre>
+
+<h3>@ResponseBody and @RestController</h3>
+<p>When we return a plain String or POJO from a controller, <code>@ResponseBody</code> is required. It tells Spring to treat the value as the <b>response body and not as a view name</b>. In the example above we did not write it because <code>@RestController</code> automatically puts <code>@ResponseBody</code> on every method (<code>@RestController</code> is meta-annotated with <code>@Controller</code> and <code>@ResponseBody</code>).</p>
+<p>With a plain <code>@Controller</code> this fails:</p>
+<pre><code class="java">@Controller
+public class UserController {
+    @GetMapping(path = "/get-user")
+    public String getUser() {
+        return "XYZ";       // treated as a VIEW name: Spring looks for a view called XYZ, finds none, error
+    }
+}</code></pre>
+
+<h2>HTTP status codes</h2>
+<div class="flow"><b>1xx</b><i>informational</i><b>2xx</b><i>success</i><b>3xx</b><i>redirection</i><b>4xx</b><i>client error</i><b>5xx</b><i>server error</i></div>
+
+<h3>2xx: Success</h3>
+<p>The request from the client was received and processed successfully.</p>
+<table>
+<tr><th>Code</th><th>Reason</th><th>Mostly used in</th><th>Details</th></tr>
+<tr><td><b>200</b></td><td>OK</td><td>GET, POST (idempotent calls)</td><td>Request successful and we return a response body.</td></tr>
+<tr><td><b>201</b></td><td>Created</td><td>POST</td><td>Request successful and a new resource was created (often with a <code>Location</code> header).</td></tr>
+<tr><td><b>202</b></td><td>Accepted</td><td>POST</td><td>Request accepted but processing is not complete yet. Batch work like export or import.</td></tr>
+<tr><td><b>204</b></td><td>No Content</td><td>DELETE</td><td>Request successful and we return <b>no data</b> in the body.</td></tr>
+<tr><td><b>206 / 207</b></td><td>Partial / Multi-Status</td><td>POST</td><td>Partial success, e.g. bulk addition of 100 users where 95 passed and 5 failed. (Strictly, 206 Partial Content is for ranged downloads; <b>207 Multi-Status</b> is the code for a mixed bulk result.)</td></tr>
+</table>
+
+<h3>3xx: Redirection</h3>
+<p>The client must take an additional action to complete the request.</p>
+<table>
+<tr><th>Code</th><th>Reason</th><th>Used when</th></tr>
+<tr><td><b>301</b></td><td>Moved Permanently</td><td>Migrating from a legacy API to a new one: all requests should go to the new URI. (Older code; the newer one is 308.)</td></tr>
+<tr><td><b>308</b></td><td>Permanent Redirect</td><td>Same as 301, but it <b>does not allow the HTTP method to change</b> on redirect: a POST to the old API must be a POST to the new one (301 relaxes this).</td></tr>
+<tr><td><b>304</b></td><td>Not Modified</td><td>GET with caching: (1) the client GETs and the server returns it with a <code>Last-Modified</code> time in a header; (2) the client caches the response; (3) the next GET passes that time in the <code>If-Modified-Since</code> header; (4) the server compares with the resource's last update: if unchanged it returns <b>304</b> with no body; (5) if modified it processes the request as usual and returns the new values.</td></tr>
+</table>
+<p>Avoid 304 with PATCH: if you try to update a user's name and it is already that name, return 204 or 200, not 304.</p>
+
+<h3>4xx: Client errors (validation)</h3>
+<p>The client needs to send a correct request.</p>
+<table>
+<tr><th>Code</th><th>Reason</th><th>Details</th></tr>
+<tr><td><b>400</b></td><td>Bad Request</td><td>The client is not passing the details needed to process the request (missing or malformed fields).</td></tr>
+<tr><td><b>401</b></td><td>Unauthorized</td><td>An API that requires authentication (Bearer token, Basic auth ...) is called <b>without valid authentication</b> details.</td></tr>
+<tr><td><b>403</b></td><td>Forbidden</td><td>The client is authenticated but <b>not allowed</b>. Say only ADMIN can perform an operation; if anyone else calls it, throw <b>403</b>.</td></tr>
+<tr><td><b>404</b></td><td>Not Found</td><td>The requested resource does not exist, e.g. GET user with id 123 but no such id in the DB.</td></tr>
+<tr><td><b>405</b></td><td>Method Not Allowed</td><td>Hitting a GET API with the POST method. In Spring Boot the DispatcherServlet raises this, so the request never reaches your controller.</td></tr>
+<tr><td><b>422</b></td><td>Unprocessable Entity</td><td>Business validation failed: e.g. users from France are not allowed to open an account because that country is not supported yet.</td></tr>
+<tr><td><b>429</b></td><td>Too Many Requests</td><td>Rate limiting: if the rule is "max 10 calls per minute per user", the 11th call of user 12345 within that minute gets 429.</td></tr>
+</table>
+
+<h3>5xx: Server errors</h3>
+<p>The request failed at the server even though the client sent a valid one: something is wrong on the server side.</p>
+<table>
+<tr><th>Code</th><th>Reason</th><th>Details</th></tr>
+<tr><td><b>500</b></td><td>Internal Server Error</td><td>Generic error when no more specific code fits.</td></tr>
+<tr><td><b>501</b></td><td>Not Implemented</td><td>The API lacks the ability to fulfil the request, or it is still in development and will exist in the future.</td></tr>
+<tr><td><b>502</b></td><td>Bad Gateway</td><td>A server acting as a proxy got an invalid response from upstream. Example: your app is behind a reverse proxy (Nginx) and Nginx cannot reach it (wrong port, misconfiguration).</td></tr>
+<tr><td><b>503</b></td><td>Service Unavailable</td><td>The server is temporarily unable to handle requests (overloaded, down for maintenance, circuit open).</td></tr>
+<tr><td><b>504</b></td><td>Gateway Timeout</td><td>The proxy or gateway did not get a response from upstream in time.</td></tr>
+</table>
+
+<h3>1xx: Informational</h3>
+<p>Interim responses that communicate progress before the final response.</p>
+<p><b>100 Continue</b> (POST): the client checks with the server before sending a big request.</p>
+<ol>
+<li>The client first sends only headers: <code>Content-Length: 1048576</code>, <code>Content-Type: multipart/form-data</code> and <code>Expect: 100-continue</code>.</li>
+<li>The server sees <code>Expect: 100-continue</code>, meaning the client is just checking. It validates everything it can (authentication, authorisation, content type, length).</li>
+<li>If the server is okay it returns <b>100 Continue</b>.</li>
+<li>The client then sends the actual body and the server processes the request.</li>
+</ol>
+
+<div class="box extra"><strong>Picking the right code (quick rules)</strong>
+<ul>
+<li>401 = "who are you?" (not authenticated). 403 = "I know you, but no" (not authorised).</li>
+<li>400 = malformed or missing input. 422 = well-formed but breaks a business rule.</li>
+<li>Created something? 201 plus a <code>Location</code> header. Deleted with nothing to return? 204.</li>
+<li>PUT/DELETE should be idempotent: repeating the call gives the same result.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>401 vs 403?</summary><p>401: missing or invalid credentials. 403: valid credentials, insufficient permission.</p></details>
+<details><summary>PUT vs POST vs PATCH?</summary><p>POST creates (not idempotent). PUT replaces a whole resource (idempotent). PATCH changes part of it.</p></details>
+<details><summary>Why use ResponseEntity instead of returning the object?</summary><p>You control status and headers per case (201, 204, 404 ...); returning the object always gives 200.</p></details>
+<details><summary>Your app behind Nginx returns 502. What does it mean?</summary><p>The proxy could not get a valid response from your app (down, wrong port, crashed). 504 would mean it timed out.</p></details>
+</div>

@@ -1,0 +1,125 @@
+<h1>Map and HashMap Internals</h1>
+<p class="kicker">Key-value storage, and exactly how a HashMap finds your data in O(1).</p>
+
+<h2>The Map interface</h2>
+<p>An object that <b>maps keys to values</b>. It <b>cannot contain a duplicate key</b>. Implementations:</p>
+<table>
+<tr><th>Class</th><th>Behaviour</th></tr>
+<tr><td><b>HashMap</b></td><td>does not maintain the order</td></tr>
+<tr><td><b>Hashtable</b></td><td>synchronized version of HashMap</td></tr>
+<tr><td><b>LinkedHashMap</b></td><td>maintains the insertion order</td></tr>
+<tr><td><b>TreeMap</b></td><td>sorts the data internally (by key)</td></tr>
+</table>
+
+<h3>Important methods</h3>
+<table>
+<tr><td><code>size()</code></td><td><code>isEmpty()</code></td><td><code>containsKey(Object key)</code></td></tr>
+<tr><td><code>containsValue(Object value)</code></td><td><code>get(Object key)</code></td><td><code>put(K key, V value)</code></td></tr>
+<tr><td><code>remove(Object key)</code></td><td><code>putAll(Map&lt;K,V&gt; m)</code></td><td><code>clear()</code></td></tr>
+<tr><td><code>Set&lt;K&gt; keySet()</code></td><td><code>Collection&lt;V&gt; values()</code></td><td><code>Set&lt;Map.Entry&lt;K,V&gt;&gt; entrySet()</code></td></tr>
+<tr><td><code>putIfAbsent(K key, V value)</code></td><td><code>getOrDefault(key, defaultValue)</code></td><td></td></tr>
+</table>
+
+<h3>The Entry sub-interface</h3>
+<p><code>Entry</code> is the sub-interface of Map, so it's accessed via <code>Map.Entry</code>. Methods: <code>getKey()</code>, <code>getValue()</code>, <code>int hashCode()</code>, <code>boolean equals(Object o)</code>.</p>
+<p>Since it's an interface, inside HashMap it's implemented as:</p>
+<pre><code class="java">static class Node&lt;K,V&gt; implements Map.Entry&lt;K,V&gt; {
+    final int hash;
+    final K key;
+    V value;
+    Node&lt;K,V&gt; next;
+    // then a constructor to initialize these 4 fields, and getters and setters
+}</code></pre>
+
+<h2>How HashMap stores data</h2>
+<p>Internally, a HashMap is an <b>array of <code>Entry&lt;K,V&gt;</code></b> (Node objects). Each Node holds <code>hash</code>, <code>key</code>, <code>value</code>, <code>next</code>. The array is of <b>size 16</b> unless the size is explicitly defined: check the HashMap implementation, the initial capacity is 16 by default (all the constants are there in the HashMap class).</p>
+<div class="diag"><div class="row"><div class="cb sm">0</div><div class="cb sm">1</div><div class="cb sm">2</div><div class="cb sm">3</div><div class="cb sm">...</div><div class="cb sm">7<br><small>Node</small></div><div class="cb sm">...</div><div class="cb sm">15</div></div></div>
+
+<h3>Working illustration: <code>put(1, "SJ")</code></h3>
+<ol>
+<li><b>Compute the hash</b> of the key: <code>hash(1)</code>, let's say <b>1234567</b>.</li>
+<li>Take its <b>modulo with the array capacity</b> to get the index where it's stored: <code>1234567 % 16 = 7</code>.</li>
+<li>It's stored at <b>index 7</b>: <code>{ hash: 1234567, key: 1, value: "SJ", next: null }</code>.</li>
+</ol>
+<div class="box extra"><strong>Why <code>hash &amp; (n-1)</code> instead of <code>%</code></strong>
+<p>These days, instead of <code>hash % n</code>, a better alternative is <b><code>index = hash &amp; (n - 1)</code></b>, as it's high-performance: a modulo operation requires division, which can take 10 to 30 clock cycles on a CPU. In contrast, a bitwise AND is a fundamental hardware-level operation that typically takes 1 clock cycle.</p>
+<p>It works only if <b>n is a power of 2</b> (true in our case). For example <code>16 = 00010000</code> has a single bit set. When we do <code>16 - 1 = 15 = 00001111</code>, all the bits to the right of that become 1. This acts as a <b>bitmask</b>: AND with this mask effectively "truncates" the hash code and always results within the range [0, 15].</p>
+<p>When the map reaches its <b>load factor threshold (default 0.75 of capacity)</b>, it triggers a <b>resize (it's doubled)</b>, and elements are <b>rehashed</b> to new positions. If I define an initial capacity of 13, inside the HashMap constructor a specialised method <code>tableSizeFor(int cap)</code> always rounds it to the next power of 2, i.e. 16.</p></div>
+
+<h3>Hash collision</h3>
+<p>Now the user does <code>map.put(10, "PJ")</code> and its index also comes out to be 7. This is known as a <b>hash collision</b>. If the key is the same, its value is overridden; otherwise the new node is chained:</p>
+<div class="flow"><b>index 7<br><small>hash 1234567<br>key 1, "SJ"</small></b><i>next</i><b>hash 5493217<br><small>key 10, "PJ"<br>next null</small></b></div>
+<p>When we do <code>get(10)</code> &rarr; compute <code>hash(10)</code> = 5493217 &rarr; modulo with 16 &rarr; index 7 (assumed here for the example), so it will <b>iterate over the linked list at index 7</b> to find the key-value pair, comparing keys with <code>equals()</code>.</p>
+
+<h2>The hashCode / equals contract</h2>
+<p><code>get(key)</code> should always give the same hash. There's a contract between <b><code>hashCode()</code></b> (generates the hash) and <b><code>equals()</code></b> (are two objects equal):</p>
+<ol>
+<li>If <code>obj1.equals(obj2)</code> then their <b>hash should also be the same</b>.</li>
+<li>If two objects have the same hash, it <b>doesn't mean</b> the two objects are equal. This is not always true.</li>
+</ol>
+<p>No matter how many times we find the hash of a key, say 5, it will always be the same. Maybe <code>hash(6) == hash(8)</code> does not mean 6 and 8 are equal. <b>equals() and hashCode() should go hand-in-hand.</b></p>
+
+<h3>What breaks if they don't</h3>
+<p>Suppose a Map has <code>(1, "Nitin")</code> and <code>(3, "Nitin")</code>. Say <code>hashCode</code> is based on <b>name</b> and <code>equals</code> checks if <b>ids</b> are the same:</p>
+<pre><code class="java">class Person {
+    int id;
+    String name;
+    Person(int id, String name) { this.id = id; this.name = name; }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof Person)) return false;
+        Person other = (Person) obj;
+        return this.id == other.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return name.hashCode();          // ✗ based on name, but equals is based on id
+    }
+}
+
+map.put(new Person(1, "Nitin"), "A");
+map.put(new Person(3, "Nitin"), "B");    // same name: both go into the same bucket x
+
+map.get(new Person(1, "Rahul"));         // different name = different hash = different bucket → returns null
+// we expect "A" because (1, "Nitin") equals (1, "Rahul"): same ids!</code></pre>
+<p>The lookup depends first on <b>hashCode</b> (to find the appropriate bucket to search in), then on <b>equals</b>. So even if equals says "same id", the HashMap won't find it if the hashCode puts it into a different bucket.</p>
+<p><b>If equals is based on id, then hashCode() must also be based on id:</b> <code>return Integer.hashCode(id);</code> (or <code>Objects.hash(id)</code>).</p>
+<p>In a HashMap, <b>hashCode() decides the bucket, equals() decides the exact key inside that bucket.</b> If you don't use the same key, your <code>get()</code> / <code>containsKey()</code> breaks. This Person object won't break in lists (no buckets), but it <b>will break in HashMap, HashSet etc.</b></p>
+<p>The contract in one line: <b>equal objects (by <code>equals()</code>) must have equal hash codes</b> (<code>==</code> is just the identical-object special case). Don't use <b>mutable fields</b> in <code>hashCode</code> for objects used as keys: if the field changes after insertion, the entry is lost in the wrong bucket.</p>
+
+<h2>Complexity</h2>
+<p>Insertion, deletion and find are <b>O(1)</b> in HashMap on average. The worst case can be <b>O(n)</b> when so many hash collisions occur.</p>
+<h3>Avoiding the worst case: treeification</h3>
+<p><code>TREEIFY_THRESHOLD</code> (8 by default): whenever a linked list at an index grows to 8 nodes, the bucket is converted to a <b>balanced binary search tree (red-black tree)</b>, bringing the complexity down to <b>O(log n)</b>.</p>
+<p>A bin (bucket) is treeified only when <b>both</b> hold:</p>
+<ol>
+<li>the number of nodes in the bucket &ge; 8 (<code>TREEIFY_THRESHOLD = 8</code>), and</li>
+<li>the table size (capacity) &ge; 64 (<code>MIN_TREEIFY_CAPACITY = 64</code>).</li>
+</ol>
+<p>If the capacity is less than 64, the HashMap prefers to <b>resize (rehash)</b> instead of treeifying. These constants are defined in the HashMap class.</p>
+<div class="box extra"><strong>Good to know</strong>
+<p>When a tree bucket shrinks back to 6 nodes or fewer (<code>UNTREEIFY_THRESHOLD</code>), it becomes a linked list again. Also, HashMap spreads the key's hash bits first (<code>h ^ (h &gt;&gt;&gt; 16)</code>) so the low bits used by <code>hash &amp; (n-1)</code> carry information from the high bits.</p></div>
+
+<h2>Nulls and thread-safety</h2>
+<ul>
+<li>HashMap allows <b>one null key</b>, and values can also be null.</li>
+<li><b>Hashtable</b> and <b>ConcurrentHashMap</b> are <b>thread-safe</b> and <b>do not store a null key or value</b>.</li>
+<li><b>HashMap is not thread-safe.</b></li>
+</ul>
+<table>
+<tr><th></th><th>HashMap</th><th>Hashtable</th><th>ConcurrentHashMap</th><th>LinkedHashMap</th><th>TreeMap</th></tr>
+<tr><td>Order</td><td>none</td><td>none</td><td>none</td><td>insertion</td><td>sorted by key</td></tr>
+<tr><td>Thread-safe</td><td>No</td><td>Yes (whole-map lock)</td><td>Yes (fine-grained)</td><td>No</td><td>No</td></tr>
+<tr><td>Null key / value</td><td>1 key, any values</td><td>none</td><td>none</td><td>1 key, any values</td><td>no null key</td></tr>
+<tr><td>get / put</td><td>O(1) avg</td><td>O(1) avg</td><td>O(1) avg</td><td>O(1) avg</td><td>O(log n)</td></tr>
+</table>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Explain how HashMap works internally.</summary><p>Hash the key, compute the bucket with <code>hash &amp; (n-1)</code>, store a Node there. Collisions chain in a linked list (tree after 8 nodes and capacity &ge; 64). <code>get</code> hashes again, finds the bucket and uses <code>equals()</code> inside it. At 75% load it doubles and rehashes.</p></details>
+<details><summary>Why must you override hashCode when you override equals?</summary><p>Otherwise equal objects can land in different buckets and lookups fail.</p></details>
+<details><summary>Why is HashMap capacity always a power of 2?</summary><p>So the index can be computed with a cheap bit mask <code>hash &amp; (n-1)</code> instead of division, and so resizing splits buckets cleanly.</p></details>
+<details><summary>HashMap vs Hashtable vs ConcurrentHashMap?</summary><p>HashMap is unsynchronized and allows null. Hashtable locks the whole map and bans null. ConcurrentHashMap locks at a finer level, so it scales far better.</p></details>
+</div>

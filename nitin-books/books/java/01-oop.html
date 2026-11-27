@@ -1,0 +1,137 @@
+<h1>OOP: Thinking in Objects</h1>
+<p class="kicker">Why Java is built around objects, and the four pillars every interview starts with.</p>
+
+<h2>Procedural programming vs OOP</h2>
+<p>Older languages like C work <b>procedurally</b>: you write functions, and data sits somewhere else for any function to touch. Java works with <b>objects</b>: data and the code that uses it are kept together.</p>
+<table>
+<tr><th>Procedural (C)</th><th>OOP (Java)</th></tr>
+<tr><td>Program is divided into parts called <b>functions</b></td><td>Program is divided into <b>objects</b></td></tr>
+<tr><td>No proper way to hide data. Importance goes to functions, and data moves around freely</td><td>Objects provide <b>data hiding</b>. Importance goes to the data</td></tr>
+<tr><td>Overloading is not possible</td><td>Overloading is possible</td></tr>
+<tr><td>Inheritance is not possible</td><td>Inheritance is possible</td></tr>
+<tr><td>No code reusability</td><td>Code is reusable</td></tr>
+<tr><td>Examples: Pascal, C, FORTRAN</td><td>Examples: Java, C#, Python, C++</td></tr>
+</table>
+
+<h2>What an object has</h2>
+<p>Every object has two things:</p>
+<ol>
+<li><b>Properties (state):</b> the data it holds.</li>
+<li><b>Behaviour (functions):</b> what it can do.</li>
+</ol>
+<div class="box ex"><strong>Example: a Dog</strong>
+<p><b>Properties:</b> age, breed, colour. <b>Behaviour:</b> bark, sleep, eat.</p></div>
+<p>A <b>class is a blueprint of the object</b>. You write the class once, then create as many objects from it as you need.</p>
+
+<div class="flow"><b>Class Dog<br><small>blueprint</small></b><i>new</i><b>Object: Bruno<br><small>age 3, brown</small></b><i>new</i><b>Object: Max<br><small>age 5, black</small></b></div>
+
+<h2>1st pillar: Data Abstraction</h2>
+<p>Abstraction <b>hides the internal implementation and shows only the essential functionality</b> to the user. In Java it is achieved through <b>interfaces</b> and <b>abstract classes</b>.</p>
+<p><b>Advantage:</b> increases security and confidentiality.</p>
+<div class="box ex"><strong>Examples from daily life</strong>
+<ul>
+<li><b>Car:</b> we are only shown the brake pedal, and if we press it the speed reduces. But how? That is abstracted from us.</li>
+<li><b>Cell phone:</b> how a call is made is abstracted from us.</li>
+</ul></div>
+
+<h2>2nd pillar: Data Encapsulation</h2>
+<p>Think of it as <b>data in a capsule</b>.</p>
+<ul>
+<li>Encapsulation <b>binds the data and the code working on that data in a single unit</b>.</li>
+<li>Also known as <b>data hiding</b>.</li>
+</ul>
+<p><b>Steps to achieve encapsulation:</b></p>
+<ol>
+<li>Declare the variables of a class as <code>private</code>.</li>
+<li>Provide <b>public getters and setters</b> to view and modify the values of those variables.</li>
+</ol>
+<div class="box ex"><strong>Example</strong>
+<pre><code class="java">class Dog {
+    private String color;          // data member, hidden from outside
+
+    public String getColor() { return color; }
+    public void setColor(String color) {
+        this.color = color;
+    }
+}</code></pre>
+<p>We encapsulated the data member and the functions that work on the data into a single unit. This class has <b>full control over its data</b>.</p></div>
+<p><b>Advantages:</b></p>
+<ul>
+<li><b>Loosely coupled code.</b> With different objects/classes, if the data in one changes, the others remain unchanged.</li>
+<li><b>Better access control and security.</b></li>
+</ul>
+<div class="box extra"><strong>Good to know</strong>
+<p>Strictly speaking, <i>data hiding</i> is the <b>result</b> of encapsulation (the <code>private</code> keyword does the hiding), while encapsulation is the bundling itself. In interviews, saying "encapsulation = bundling data and methods, and data hiding is achieved using private fields plus getters and setters" is the safest answer.</p></div>
+
+<h2>3rd pillar: Inheritance</h2>
+<p>The capability to <b>inherit properties from the parent class</b>. It can be both functions and variables.</p>
+<ul>
+<li>Promotes <b>code reusability</b>.</li>
+<li>Can achieve <b>polymorphism</b>.</li>
+</ul>
+<p><b>Types:</b> Single, Multilevel, Hierarchical, Multiple.</p>
+<div class="cols3">
+<div class="card"><h4>Single</h4><div class="tree"><b>A</b><s>↓</s><b>B</b></div><p>One parent, one child.</p></div>
+<div class="card"><h4>Multilevel</h4><div class="tree"><b>A</b><s>↓</s><b>B</b><s>↓</s><b>C</b></div><p>A chain of parents.</p></div>
+<div class="card"><h4>Hierarchical</h4><div class="tree"><b>A</b><s>↙ ↘</s><span class="row2"><b>B</b><b>C</b></span></div><p>One parent, many children.</p></div>
+</div>
+
+<h3>Multiple inheritance and the diamond problem</h3>
+<p>Class C extends both class A and class B, and both have a <code>getEngine()</code> method. If you call <code>c.getEngine()</code>, which one runs? It clashes, so this is <b>not allowed in Java</b> with classes. This is the <b>diamond problem</b>.</p>
+<p>But if A and B are <b>interfaces</b>, it is <b>allowed</b>, because class C has to <b>override</b> the method itself, so there is no confusion. Through interfaces we can resolve the diamond problem.</p>
+<pre><code class="java">interface A { void getEngine(); }
+interface B { void getEngine(); }
+
+class C implements A, B {
+    public void getEngine() {      // C decides what happens
+        System.out.println("C's engine");
+    }
+}</code></pre>
+
+<h2>4th pillar: Polymorphism</h2>
+<p><b>Poly = many, morph = forms.</b> The same method behaves differently in different situations. A person can be a father, a husband, an employee, all at once.</p>
+<p><b>Types:</b></p>
+<ul>
+<li><b>Compile time / Static polymorphism / Method overloading</b></li>
+<li><b>Run time / Dynamic polymorphism / Method overriding</b></li>
+</ul>
+
+<h3>Overloading (compile time)</h3>
+<p>Same method name, different parameters. The compiler picks the right one at compile time: when I write <code>sum(5, 2)</code> it already knows which version to call.</p>
+<pre><code class="java">int sum(int a, int b)          { return a + b; }
+String sum(String a, String b) { return a + b; }</code></pre>
+<p>It can be done only on the <b>parameters, not the return type</b>. This is <b>not valid</b>:</p>
+<pre><code class="java">int    sum(int x, int y)  { ... }
+String sum(int x, int y)  { ... }   // compile error: same parameters</code></pre>
+
+<h3>Overriding (run time)</h3>
+<p>The child class gives its own implementation of a parent method. Even the <b>arguments must be the same</b>. Only the internal implementation differs.</p>
+<div class="box ex"><strong>Suppose</strong>
+<p>Parent has <code>show()</code>. Child has <code>show(String msg)</code> and <code>show(int x)</code>.</p>
+<p>That is completely valid, but it is <b>overloading, not overriding</b>. If the child had <code>show()</code> with the same signature, then it would be overriding.</p></div>
+
+<h2>Is-a and Has-a relationships</h2>
+<ul>
+<li><b>Is-a:</b> Dog <i>is a</i> Animal. This is inheritance.</li>
+<li><b>Has-a:</b> an object of class A is used in class B.
+  <ul><li>Can be one-to-one, one-to-many, many-to-one.</li>
+  <li>Examples: School has students, Bike has engine.</li></ul></li>
+</ul>
+
+<h2>Association: aggregation and composition</h2>
+<p><b>Association</b> is a relation between two different objects. It comes in two strengths:</p>
+<table>
+<tr><th></th><th>Aggregation (weak relation)</th><th>Composition (strong relation)</th></tr>
+<tr><td>Meaning</td><td>Ending of one object <b>doesn't</b> end the other</td><td>Ending of one object <b>will</b> end the other</td></tr>
+<tr><td>Example</td><td>School has students. If students leave, the school enrols others, and vice versa</td><td>School has classes (rooms). If the school is destroyed, the classes die with it</td></tr>
+</table>
+<div class="flow"><b>School</b><i>aggregation: students outlive it</i><b>Student</b></div>
+<div class="flow"><b>School</b><i>composition: class dies with it</i><b>Class</b></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Abstraction vs encapsulation?</summary><p>Abstraction is about <i>hiding complexity</i> by showing only what is needed (interfaces, abstract classes). Encapsulation is about <i>protecting data</i> by bundling it with its methods and restricting direct access (private fields, getters and setters).</p></details>
+<details><summary>Why does Java not support multiple inheritance with classes?</summary><p>To avoid the diamond problem: if two parents have the same method, the child cannot know which to inherit. Interfaces are allowed because the implementing class must provide its own body.</p></details>
+<details><summary>Overloading vs overriding?</summary><p>Overloading: same name, different parameters, resolved at compile time, within one class (or across parent and child). Overriding: same name and same parameters, child replaces parent behaviour, resolved at run time.</p></details>
+<details><summary>Can we overload by changing only the return type?</summary><p>No. The compiler looks at the method name and parameter list, so two methods that differ only in return type clash.</p></details>
+<details><summary>Aggregation vs composition?</summary><p>Both are "has-a". In aggregation the parts can live without the whole (students without the school). In composition the parts cannot (rooms without the school).</p></details>
+</div>

@@ -1,0 +1,100 @@
+<h1>List: ArrayList, LinkedList, Vector, Stack</h1>
+<p class="kicker">Ordered collections you can reach by position.</p>
+
+<h2>The List interface</h2>
+<p>Gets all the methods of the <code>Collection</code> interface, plus its own:</p>
+<table>
+<tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>add(int index, E element)</code>, <code>addAll(int index, Collection c)</code></td><td>insert at a position</td></tr>
+<tr><td><code>get(int index)</code>, <code>set(int index, E e)</code></td><td>read or replace by position</td></tr>
+<tr><td><code>remove(int index)</code></td><td>remove by position</td></tr>
+<tr><td><code>indexOf(Object o)</code></td><td>index of the <b>first</b> occurrence; <b>-1</b> if not present</td></tr>
+<tr><td><code>lastIndexOf(Object o)</code></td><td>index of the last occurrence</td></tr>
+<tr><td><code>replaceAll(UnaryOperator op)</code></td><td>apply a function to every element</td></tr>
+<tr><td><code>sort(Comparator c)</code></td><td>sort in place</td></tr>
+<tr><td><code>subList(int from, int to)</code></td><td>a view of a range: <b>from inclusive</b>, <b>to exclusive</b></td></tr>
+<tr><td><code>listIterator()</code></td><td>a two-way iterator (below)</td></tr>
+</table>
+<pre><code class="java">List&lt;Integer&gt; list = new ArrayList&lt;&gt;();      // ArrayList: a concrete class which implements List
+list.replaceAll((Integer val) -&gt; -1 * val);
+list.sort((Integer val1, Integer val2) -&gt; val1 - val2);</code></pre>
+
+<h2>ListIterator</h2>
+<p><code>ListIterator&lt;E&gt; listIterator()</code> extends <code>Iterator</code>, so it has <code>hasNext()</code>, <code>next()</code>, <code>remove()</code> and <b>new methods that help to iterate in the backward direction</b>:</p>
+<table>
+<tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>boolean hasPrevious()</code></td><td>is there an element behind the cursor?</td></tr>
+<tr><td><code>E previous()</code></td><td>returns the previous element and moves the cursor position backward (throws an exception if none)</td></tr>
+<tr><td><code>int nextIndex()</code></td><td>index of the next element (returns the size of the list if it's at the end)</td></tr>
+<tr><td><code>int previousIndex()</code></td><td>index of the previous element (returns -1 if it's at the start)</td></tr>
+<tr><td><code>add(E e)</code></td><td>inserts the element immediately before the element that would be returned by <code>next</code> and after the element that would be returned by <code>previous</code>. A subsequent call to <code>next()</code> is not impacted.</td></tr>
+<tr><td><code>set(E e)</code></td><td>replaces the last element returned by <code>next</code> or <code>previous</code> with the given element</td></tr>
+</table>
+<p><code>listIterator(int index)</code> starts the iterator from a specific index. That index indicates the first element that would be returned by an initial call to <code>next</code>.</p>
+
+<h3>Where is the cursor?</h3>
+<p>Basically it does <b>not stand at any element</b>, it stands <b>between two elements</b>.</p>
+<div class="diag">
+<div class="row"><div class="cb sm">&#9660;</div><div class="cb sm">100</div><div class="cb sm">-10</div></div>
+<p style="text-align:center"><small>Initially the pointer is before the first element. After <code>next()</code> it moves forward by one: the previous element is 100, the next is -10.</small></p>
+<div class="row"><div class="cb sm">100</div><div class="cb sm">-3</div><div class="cb sm">-10</div></div>
+<p style="text-align:center"><small>While iterating, <code>lit.add(-3)</code> puts -3 behind the cursor: now <b>previous = -3</b> and <b>next is still -10</b> (the subsequent call to <code>next()</code> is not impacted).</small></p></div>
+<pre><code class="java">ListIterator&lt;Integer&gt; lit = list.listIterator();
+while (lit.hasNext()) { /* ... */ }
+
+// to start from the end (or any index):
+ListIterator&lt;Integer&gt; listIterator = list.listIterator(list.size());
+while (listIterator.hasPrevious()) {
+    listIterator.previous();      // walks backward
+}</code></pre>
+
+<h2>ArrayList</h2>
+<p>Internally uses an <b>array</b> (and in Java, <code>Array</code> is also a child of the <code>Object</code> class).</p>
+<h4>Time complexity</h4>
+<table>
+<tr><th>Operation</th><th>Cost</th><th>Why</th></tr>
+<tr><td>Insertion at the end</td><td><b>O(1)</b></td><td>space is sufficient</td></tr>
+<tr><td>Insertion at a particular index</td><td><b>O(n)</b></td><td>shifting of values is required</td></tr>
+<tr><td>Insertion when the array is full</td><td><b>O(n)</b></td><td>the array size threshold is reached; values are copied to a bigger array</td></tr>
+<tr><td>Deletion</td><td><b>O(n)</b></td><td>we have to shift the values</td></tr>
+<tr><td>Access by index (<code>get</code>)</td><td><b>O(1)</b></td><td>direct array position</td></tr>
+<tr><td>Search for a value (<code>contains</code>, <code>indexOf</code>)</td><td><b>O(n)</b></td><td>every element may have to be checked</td></tr>
+</table>
+
+<p><b>ArrayList is also not thread-safe.</b> The thread-safe version is:</p>
+<pre><code class="java">List&lt;Integer&gt; list = new CopyOnWriteArrayList&lt;&gt;();</code></pre>
+
+<h2>LinkedList</h2>
+<p>Implements <b>both <code>Deque</code> and <code>List</code></b> (clear from the collections hierarchy). Supports the methods of both Deque and List.</p>
+<h4>Time complexity</h4>
+<ul>
+<li>Insertion and deletion at the <b>start and end</b>: <b>O(1)</b>.</li>
+<li>Search, insertion and deletion at a <b>particular index</b>: <b>O(n)</b>, for the lookup of the index.</li>
+</ul>
+<p><b>LinkedList is not thread-safe.</b></p>
+<div class="box extra"><strong>ArrayList or LinkedList?</strong>
+<p>Default to <b>ArrayList</b>: it's compact in memory, and index access is O(1). LinkedList only wins when you add or remove at the ends (or through an iterator) all the time. For queues and stacks, <code>ArrayDeque</code> is usually even better.</p></div>
+
+<h2>Vector</h2>
+<ul>
+<li>Exactly the same as ArrayList: elements can be accessed via index.</li>
+<li>But it's <b>thread-safe</b>: it puts a lock when an operation is performed on the Vector.</li>
+<li><b>Less efficient</b> than ArrayList, as for each operation it does lock/unlock internally.</li>
+</ul>
+<pre><code class="java">Vector&lt;Integer&gt; obj = new Vector&lt;&gt;();</code></pre>
+<p><b>Stack</b> is a child of Vector (so also thread-safe). <b>Deque</b> is recommended for DSA stack and queue problems: it's faster.</p>
+<table>
+<tr><th>Class</th><th>Backed by</th><th>Thread-safe?</th><th>Use when</th></tr>
+<tr><td>ArrayList</td><td>array</td><td>No</td><td>the default list</td></tr>
+<tr><td>LinkedList</td><td>doubly linked nodes</td><td>No</td><td>many adds/removes at the ends</td></tr>
+<tr><td>Vector</td><td>array</td><td>Yes (every method locks)</td><td>legacy code only</td></tr>
+<tr><td>Stack</td><td>Vector</td><td>Yes</td><td>legacy; prefer ArrayDeque</td></tr>
+<tr><td>CopyOnWriteArrayList</td><td>array copied on write</td><td>Yes</td><td>reads far outnumber writes</td></tr>
+</table>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>ArrayList vs LinkedList?</summary><p>ArrayList: array-backed, O(1) get by index, O(n) insert in the middle. LinkedList: node-based, O(1) at the ends, O(n) to reach an index.</p></details>
+<details><summary>ArrayList vs Vector?</summary><p>Vector is synchronized (thread-safe but slower) and legacy; ArrayList is not synchronized.</p></details>
+<details><summary>How does an ArrayList grow?</summary><p>When full, it allocates a bigger array (about 1.5 times) and copies the old elements, so an add is amortized O(1).</p></details>
+<details><summary>Iterator vs ListIterator?</summary><p>ListIterator works only on Lists, moves both ways, and can add and set while iterating.</p></details>
+</div>

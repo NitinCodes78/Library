@@ -1,0 +1,214 @@
+<h1>Locks, Atomic Variables and volatile</h1>
+<p class="kicker">Beyond <code>synchronized</code>: explicit locks, lock-free counters, and what volatile really does.</p>
+
+<h2>Why more locks?</h2>
+<p>Monitor locks are <b>associated with every object</b>, for a synchronized method or block. Suppose three objects <code>obj1</code>, <code>obj2</code>, <code>obj3</code> all run the same synchronized critical section. Since they are <b>different objects</b>, they'll be able to access it <b>in parallel</b>.</p>
+<p>But I want only <b>one thread</b> to access this critical section (they may be from different objects). So we have certain locks to tackle this, and they <b>do not depend on an object</b> like a synchronized method does. There are four types.</p>
+
+<h2>1. ReentrantLock</h2>
+<pre><code class="java">public class SharedResource {
+    boolean isAvailable = false;
+
+    public void produce(ReentrantLock lock) {      // no synchronized keyword
+        try {
+            lock.lock();
+            isAvailable = true;
+            Thread.sleep(4000);
+        } catch (Exception e) {
+        } finally {
+            lock.unlock();                          // always unlock in finally
+        }
+    }
+}
+
+// main: one lock object shared by two different SharedResource objects
+ReentrantLock lock = new ReentrantLock();
+SharedResource r1 = new SharedResource();
+Thread th1 = new Thread(() -&gt; { r1.produce(lock); });
+SharedResource r2 = new SharedResource();
+Thread th2 = new Thread(() -&gt; { r2.produce(lock); });   // on different objects
+th1.start();  th2.start();
+// we'll observe th2 runs 4 seconds later, after the lock is released</code></pre>
+<p>Even though <code>r1</code> and <code>r2</code> are different objects, <b>the lock object is the one point of control</b>.</p>
+<div class="box extra"><strong>Why "reentrant"?</strong>
+<p>The thread that already owns the lock can acquire it again without blocking itself (it keeps a hold count). Also unlike <code>synchronized</code>, it offers <code>tryLock()</code>, <code>tryLock(timeout)</code>, <code>lockInterruptibly()</code> and a fairness option.</p></div>
+
+<h2>Shared lock and exclusive lock</h2>
+<ul>
+<li><b>Shared lock (S-lock) = read lock:</b> multiple transactions can hold a shared lock on a data item simultaneously.</li>
+<li><b>Exclusive lock (X-lock) = write lock:</b> allows a transaction to both read and update a data item, preventing any other transaction from obtaining a shared or exclusive lock on that same data.</li>
+</ul>
+<table>
+<tr><th>Thread 1 holds &rarr; / Thread 2 asks &darr;</th><th>S-lock</th><th>X-lock</th></tr>
+<tr><td><b>S-lock</b></td><td>&#10003; allowed</td><td>&#10007;</td></tr>
+<tr><td><b>X-lock</b></td><td>&#10007;</td><td>&#10007;</td></tr>
+</table>
+<p>Only the S + S pair is allowed, for obvious reasons.</p>
+
+<h2>2. ReadWriteLock</h2>
+<p><b>Read lock:</b> more than 1 thread can acquire the read lock. <b>Write lock:</b> only 1 thread can acquire the write lock.</p>
+<pre><code class="java">ReadWriteLock lock = new ReentrantReadWriteLock();     // interface's implementation
+
+lock.readLock().lock();      lock.writeLock().lock();
+lock.readLock().unlock();    lock.writeLock().unlock();
+// more threads can access at the same time     // only one thread at a time, others wait
+// if this lock is the read lock</code></pre>
+<p>Suppose T1 and T2 are using <code>readLock()</code> and T3 wants <code>writeLock()</code> using the same lock object: T3 waits, <b>even if the resource is different</b> (SharedResource R1 vs R2). The lock object itself acts as the single point of synchronization control for any and all resources, regardless of the specific resource being accessed.</p>
+<p><b>Mostly used when reads are more than writes.</b></p>
+
+<h2>3. StampedLock</h2>
+<p>Supports read/write lock functionality, plus <b>optimistic read</b>.</p>
+<div class="tree2"><div class="top">Locking styles</div><div class="kids"><div><b>Pessimistic</b><br><small>synchronized, ReentrantLock, ReadWriteLock: we put a shared lock, an exclusive lock and so on</small></div><div><b>Optimistic</b><br><small>no lock acquired (optimistic concurrency control)</small></div></div></div>
+
+<h3>Optimistic concurrency, seen in a database</h3>
+<table>
+<tr><th>id</th><th>name</th><th>type</th><th>row version</th></tr>
+<tr><td>123</td><td>SJ</td><td>Student</td><td>1</td></tr>
+<tr><td>456</td><td>Ram</td><td>Student</td><td>1</td></tr>
+</table>
+<ol>
+<li><b>Time 1:</b> T1 and T2 both read id 123 (row version = 1).</li>
+<li><b>Time 2:</b> T1: <code>update table set type = 'teacher', version = version + 1 where id = 123 and version = 1</code>. T2: <code>update table set type = 'ex-student', version = version + 1 where id = 123 and version = 1</code>.</li>
+<li><b>Time 3:</b> say T2 physically reaches first: it updates 123 and the version becomes 2. So T1's update will be rolled back (it won't even be executed), because the version is now 2.</li>
+</ol>
+<p>To use this in SQL we have to do the versioning manually. (Hibernate gives it through <code>@Version</code>.)</p>
+<div class="box extra"><strong>Side note: Postgres uses MVCC by default</strong>
+<p>Multi-Version Concurrency Control: <b>updates don't lock reads, and reads don't block writes</b>. It creates a new version (snapshot) of a row whenever it is updated, rather than overwriting the original data in place. Readers can view the old version without being blocked by writers.</p>
+<p>For 2 concurrent writes: (i) the first writer reaches the row, locks it and creates a new version; (ii) the second writer hits the lock and pauses; (iii) the first writer commits; (iv) the second writer "wakes up", sees the new version and overwrites it with its own update. The "last one to finish" effectively wins. So we can use <code>version = X</code> to prevent this "last win" behaviour.</p>
+<p>Because of MVCC, rows are never physically deleted or overwritten immediately. Instead they are marked as "dead" so older, long-running transactions can still see them if needed. The <b>autovacuum</b> daemon periodically wakes up and scans the table for those "dead tuples"; once a row version is no longer visible to any active transaction, vacuum marks that spot on the disk as reusable (new inserts happen there). We do a manual vacuum if there were massive data changes. The background autovacuum only marks space as "reusable" inside the existing file; it almost never returns space to the operating system. If a table ballooned to 100 GB and now it's 10 GB of real data, the disk will stay "90% empty air" until we run a manual <code>VACUUM FULL</code>.</p></div>
+
+<h3>Back to StampedLock</h3>
+<pre><code class="java">public class SharedResource {
+    int a = 10;
+    StampedLock lock = new StampedLock();
+
+    // optimistic READ: no lock taken
+    public int consumer() {
+        long stamp = lock.tryOptimisticRead();   // returns a stamp: similar to a version
+        int local = a;                           // read the fields into local variables
+        if (!lock.validate(stamp)) {             // true if no writer came in since the stamp
+            stamp = lock.readLock();             // a writer did: fall back to a real read lock
+            try {
+                local = a;                       // and read again
+            } finally {
+                lock.unlockRead(stamp);
+            }
+        }
+        return local;
+    }
+
+    // WRITE: a real lock (the write lock call returns a stamp)
+    public void producer() {
+        long stamp = lock.writeLock();
+        try {
+            a = 11;
+        } finally {
+            lock.unlockWrite(stamp);
+        }
+    }
+}</code></pre>
+<p>The optimistic read did no lock/unlock like the others do: it takes a stamp, reads, and then only checks whether a writer interfered. That is what makes it fast when writes are rare. Optimistic locking is meant for <b>reading</b>: never write to shared state under an optimistic stamp, because another thread could see your half-done write before you "roll back". Use <code>writeLock()</code> for updates. StampedLock is also <b>not reentrant</b>.</p>
+
+<h2>4. Semaphore</h2>
+<p>A semaphore holds a number of <b>permits</b>. Suppose 4 threads try to access this: the permit value is 2, so only 2 threads will be able to access it; the other 2 wait until those are finished.</p>
+<pre><code class="java">boolean flag = false;
+Semaphore lock = new Semaphore(2);       // permits
+
+try {
+    lock.acquire();
+    flag = true;
+    Thread.sleep(4000);
+} catch (Exception e) {
+} finally {
+    lock.release();
+}</code></pre>
+<p>Just like we used <code>wait()</code>, <code>notify()</code>, <code>notifyAll()</code> in a monitor lock, for these locks we can use <b><code>await()</code>, <code>signal()</code> and <code>signalAll()</code></b> (from a <code>Condition</code> created with <code>lock.newCondition()</code>) for inter-thread communication.</p>
+<table>
+<tr><th>Lock</th><th>Who gets in</th><th>Use when</th></tr>
+<tr><td>synchronized</td><td>one thread per object</td><td>simple cases</td></tr>
+<tr><td>ReentrantLock</td><td>one thread per lock object</td><td>need tryLock, timeouts, fairness, conditions</td></tr>
+<tr><td>ReadWriteLock</td><td>many readers or one writer</td><td>reads far more than writes</td></tr>
+<tr><td>StampedLock</td><td>many readers or one writer, plus optimistic reads</td><td>read-heavy, performance-critical</td></tr>
+<tr><td>Semaphore</td><td>up to N threads</td><td>limit concurrent access (connection pool, rate limit)</td></tr>
+</table>
+
+<h2>Atomic variables, volatile and concurrency</h2>
+<div class="tree2"><div class="top">Concurrency can be achieved using</div><div class="kids">
+<div><b>Lock-based mechanisms</b><div class="kids sm"><div>synchronized</div><div>Reentrant</div><div>Stamped</div><div>ReadWrite</div><div>Semaphores</div></div></div>
+<div><b>Lock-free mechanism</b><br><small>faster, but a very specific use case</small><div class="kids sm"><div><b>CAS operation</b> (compare-and-swap)<br>AtomicInteger, AtomicBoolean, AtomicLong, AtomicReference (for objects)</div></div></div>
+</div></div>
+
+<h3>CAS (compare-and-swap)</h3>
+<p>CAS is very similar to optimistic concurrency control (mostly with DB). The CAS technique:</p>
+<ol>
+<li>It's a <b>low-level operation</b>, supported by the CPU.</li>
+<li>It's <b>atomic</b>, and all modern processors support it.</li>
+</ol>
+<p>It involves 3 main parameters:</p>
+<ol>
+<li><b>Memory location:</b> where the variable is stored.</li>
+<li><b>Expected value:</b> the value which should be present in the memory.</li>
+<li><b>New value:</b> the new value to be written to the memory, written <b>only if the current value equals the expected value</b>.</li>
+</ol>
+<pre><code>CAS(memory, expectedValue, newValue) {
+    (i)   load / read the variable at memory M
+    (ii)  compare the memory data vs expected
+    (iii) update the memory data to new, if current == expected
+}</code></pre>
+
+<h3>The ABA problem</h3>
+<div class="flow"><b>10</b><i>changed to</i><b>12</b><i>changed back</i><b>10</b></div>
+<p><code>CAS(memory, 10, 15)</code>: ideally the expected value is 10, but the memory went from 10 to 12 to 10. That's <b>not exactly the same</b> situation (something happened in between), yet CAS sees 10 and succeeds. The ABA problem in this scenario is solved using a <b>version / timestamp</b> (Java: <code>AtomicStampedReference</code>).</p>
+
+<h3>Atomic variables</h3>
+<p>Atomic means <b>single or "all or nothing"</b>. <code>int a = 10;</code> is an atomic operation: a single operation, so it will be consistent regardless of the number of threads doing it.</p>
+<pre><code class="java">public class SharedResource {
+    int counter;
+    public void increment() { counter++; }     // NOT atomic: 3 operations
+    public int get() { return counter; }
+}
+// (i) load the counter value  (ii) add 1  (iii) assign it back</code></pre>
+<p>If two threads try to increment at exactly the same time, there may be <b>data loss</b>:</p>
+<pre><code class="java">SharedResource resource = new SharedResource();
+Thread t1 = new Thread(() -&gt; { for (int i = 0; i &lt; 200; i++) resource.increment(); });
+Thread t2 = new Thread(() -&gt; { for (int i = 0; i &lt; 200; i++) resource.increment(); });
+t1.start();  t2.start();
+// output: 371 (should have been 400): two threads may have incremented the same value at exactly the same time</code></pre>
+<p><b>Two solutions:</b></p>
+<pre><code class="java">// (i) using a lock like synchronized
+public synchronized void increment() { counter++; }
+
+// (ii) using a lock-free operation like AtomicInteger (internally CAS)
+public class SharedResource {
+    AtomicInteger counter = new AtomicInteger(0);
+    public void increment() { counter.incrementAndGet(); }     // uses compare and swap
+    public int get() { return counter.get(); }
+}</code></pre>
+<p>Internally <code>incrementAndGet</code> does a CAS loop (read, modify, update):</p>
+<pre><code class="java">do {
+    // (i) read: it's 10    (ii) modify: 11    (iii) value is now 11
+} while (!cas(memory, expected, newValue));</code></pre>
+<ol>
+<li>For T1, the value becomes 11 as shown above.</li>
+<li>Now T2 had also come at the same time. In the while, the CAS function returns <b>false</b>, because expected is 10 but the current value is 11. So it goes in the <code>do</code> block again, and expected is now 11. It gets updated to <b>12</b>.</li>
+</ol>
+<p>If it were not atomic, the second thread would have set it to 11 only (10 + 1). Atomic classes also have <code>getAndIncrement()</code>, <code>addAndGet(n)</code>, <code>compareAndSet(expected, new)</code>.</p>
+
+<h2>volatile</h2>
+<p><b>Atomic is thread-safe</b>, whereas <b>volatile has no relation with concurrency</b> as such. So what's volatile?</p>
+<div class="diag">
+<div class="row"><div class="cb">CPU core 1<br><small>T1 works here</small></div><div class="cb">CPU core 2<br><small>T2 working here</small></div></div>
+<div class="row"><div class="cb sm">L1 cache</div><div class="cb sm">L1 cache</div></div>
+<div class="row"><div class="cb wide">L2 cache</div></div>
+<div class="row"><div class="cb wide">Memory (RAM)</div></div></div>
+<p>T1 updates <code>x = 11</code> and it's in its own L1 cache currently. T2 also tries to increment x: it checks its own L1 and L2 caches, the value of x isn't present there; in memory it's 10, so it updates to 11, i.e. <b>data loss</b>, because the cache has not been synced. (Modern hardware keeps caches coherent, but the compiler or CPU may still keep a value in a register and reorder instructions, which gives the same symptom.)</p>
+<p><b>volatile</b> guarantees <b>visibility</b> (a write is seen by later reads in other threads) and <b>ordering</b> (no reordering across it), using memory barriers, which makes it slower than a normal variable. It does <b>not</b> make compound actions atomic: <code>volatile int counter; counter++;</code> still loses updates, so use <code>AtomicInteger</code> for that. Good uses of volatile: a stop flag, or the singleton instance in double-checked locking.</p>
+
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>synchronized vs ReentrantLock?</summary><p>ReentrantLock adds tryLock, timeouts, interruptible locking, fairness and multiple Conditions, but you must unlock in finally yourself.</p></details>
+<details><summary>Why is i++ not thread-safe?</summary><p>It is read-modify-write: three steps that can interleave. Fix with synchronized, a lock or AtomicInteger.</p></details>
+<details><summary>volatile vs atomic?</summary><p>volatile gives visibility and ordering for a single read or write. Atomic classes also make read-modify-write (increment, compareAndSet) atomic via CAS.</p></details>
+<details><summary>What is the ABA problem?</summary><p>A value goes A to B and back to A, so CAS thinks nothing changed. Solved by versioning, e.g. AtomicStampedReference.</p></details>
+<details><summary>When would you use a Semaphore?</summary><p>To cap concurrent access to N, e.g. at most 10 simultaneous DB connections or API calls.</p></details>
+</div>

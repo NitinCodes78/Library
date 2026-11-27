@@ -1,0 +1,70 @@
+<h1>Methods: static, final, abstract, varargs</h1>
+<p class="kicker">How methods are bound, what static really means, and the rules for special kinds of methods.</p>
+
+<h2>Why overriding is called dynamic binding</h2>
+<p>Overriding is also called <b>dynamic binding / runtime polymorphism</b>.</p>
+<pre><code class="java">Person obj = new Doctor();
+obj.profession();</code></pre>
+<p>Here Java decides <b>at runtime</b>: if the <code>profession()</code> method is there in <code>Doctor</code>, it calls that, else the one in <code>Person</code>.</p>
+<div class="flow"><b>Person obj</b><i>actually points to</i><b>Doctor object</b><i>runtime check</i><b>Doctor.profession()</b></div>
+
+<h2>Static methods</h2>
+<ul>
+<li><b>Associated with the class.</b> Can be called with just the class name, no need to make an object.</li>
+<li><b>Cannot access non-static instance variables and methods.</b></li>
+<li><b>Cannot be overridden.</b></li>
+</ul>
+<p><b>Why can't they access non-static things?</b> It doesn't make sense (Java is very logical). Static methods are called <i>without</i> objects, whereas objects are to be created for non-static methods. If a static method could call a non-static one, it would defy the non-static one's behaviour (which object would it work on?).</p>
+<p><b>Why can't they be overridden?</b> Again, they are associated with that class. No one has the right to do so.</p>
+<table>
+<tr><th>Non-static</th><th>Static</th></tr>
+<tr><td>Associated with <b>objects</b> of that class</td><td>Associated with the <b>class</b></td></tr>
+<tr><td>Each object has its own copy</td><td><b>Only one copy</b> in memory, with the class</td></tr>
+<tr><td>Overriding: <b>run time (dynamic)</b></td><td>Static: <b>compile time</b></td></tr>
+</table>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>If a child class writes a static method with the same signature as the parent's, it is not an error, but it is <b>method hiding</b>, not overriding. The method called depends on the reference type, not the object.</li>
+<li>A static method <i>can</i> use non-static members if it creates an object first (<code>new Foo().bar()</code>). It just cannot use them directly.</li>
+<li>This is why <code>main</code> is static: the JVM can call it before any object exists.</li>
+</ul></div>
+
+<h2>Final methods</h2>
+<p>Final methods cannot be overridden. Because it can't be changed, then why override.</p>
+
+<h2>Abstract methods</h2>
+<p>Defined in <b>abstract classes</b> (and, by default, in <b>interfaces</b>). <b>Only the method declaration</b> is done; its implementation is done in the child classes.</p>
+<pre><code class="java">abstract class Shape {
+    abstract double area();          // no body
+}
+class Circle extends Shape {
+    double r = 2;
+    double area() { return Math.PI * r * r; }
+}</code></pre>
+<p>The rule to remember: a class with an abstract method must itself be abstract, or be an interface.</p>
+
+<h2>Variable arguments (varargs)</h2>
+<pre><code class="java">public static int sum(int... variable) {   // treated as an array (int[])
+    int output = 0;
+    for (int var : variable) {
+        output += var;
+    }
+    return output;
+}
+
+sum(1, 1);
+sum(2, 3);
+sum(3, 4, 5, 6);</code></pre>
+<ul>
+<li>A <b>variable number of inputs</b> in the parameter. Inside the method it is an <b>array</b>, which is why the for-each loop works and why <code>sum(new int[]{1,2,3})</code> is also a valid call.</li>
+<li>Only <b>one</b> variable argument can be present in the method.</li>
+<li>It should be the <b>last argument</b> in the list.</li>
+</ul>
+
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Can we override a static method?</summary><p>No. A child can declare a static method with the same signature, but that hides the parent's one; it is not runtime polymorphism.</p></details>
+<details><summary>Why can't a static method use this or non-static fields?</summary><p>It belongs to the class, not to any object, so there is no "current object" (<code>this</code>) to refer to.</p></details>
+<details><summary>Can you overload main()?</summary><p>Yes, you can write other <code>main</code> methods with different parameters, but the JVM only starts from <code>public static void main(String[] args)</code>.</p></details>
+<details><summary>Can a method have two varargs parameters?</summary><p>No. Only one, and it must be last.</p></details>
+</div>

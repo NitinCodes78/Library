@@ -1,0 +1,188 @@
+<h1>Executors, Fork-Join and Shutdown</h1>
+<p class="kicker">Ready-made pools, work stealing, scheduling and stopping cleanly.</p>
+
+<h2>Executors utility: factory methods</h2>
+<p>The full constructor is verbose:</p>
+<pre><code class="java">ThreadPoolExecutor poolExecutor = new ThreadPoolExecutor(2, 5, 1, TimeUnit.HOURS,
+        new ArrayBlockingQueue&lt;&gt;(10), new CustomThreadFactory(), new CustomRejectedHandler());
+//      corePoolSize, maxPoolSize, keepAliveTime</code></pre>
+<p><b>Executors provide factory methods</b> which we can use to create a ThreadPoolExecutor. Present in the <code>java.util.concurrent</code> package.</p>
+
+<table>
+<tr><th></th><th>1. FixedThreadPool</th><th>2. CachedThreadPool</th><th>3. SingleThreadExecutor</th></tr>
+<tr><td><b>Method</b></td><td><code>newFixedThreadPool(n)</code></td><td><code>newCachedThreadPool()</code></td><td><code>newSingleThreadExecutor()</code></td></tr>
+<tr><td><b>Min / max pool</b></td><td>same (n)</td><td>min 0, max <code>Integer.MAX_VALUE</code></td><td>min 1, max 1</td></tr>
+<tr><td><b>Queue</b></td><td>unbounded queue</td><td>blocking queue with size 0 (a hand-off): as soon as a request comes a new thread is created, it does the work, no one waits in the queue</td><td>unbounded queue</td></tr>
+<tr><td><b>Thread alive when idle</b></td><td>n/a (core threads stay)</td><td>60 seconds</td><td>yes</td></tr>
+<tr><td><b>When to use</b></td><td>When we know exactly how many async tasks are needed</td><td>Good for handling bursts of short-lived tasks</td><td>When you need to process tasks <b>sequentially</b></td></tr>
+<tr><td><b>Disadvantage</b></td><td>Not good when the workload is heavy, as it will lead to limited concurrency</td><td>Many long-lived tasks submitted rapidly: the pool can create so many threads which might lead to increased memory usage</td><td>No concurrency at all</td></tr>
+</table>
+<pre><code class="java">ExecutorService poolExecutor1 = Executors.newFixedThreadPool(5);        // 5 threads
+poolExecutor1.submit(() -&gt; "...");
+
+ExecutorService poolExecutor2 = Executors.newCachedThreadPool();        // creates a thread as needed (dynamically)
+poolExecutor2.submit(() -&gt; "this ...");
+
+ExecutorService poolExecutor3 = Executors.newSingleThreadExecutor();    // one worker thread</code></pre>
+<p>The cached pool's maximum is <code>Integer.MAX_VALUE</code>: practically unlimited, which is why a flood of long tasks can exhaust memory. Fixed and Single both use an <b>unbounded</b> queue, so production guidance (and the Alibaba/Sonar rules) says to build a <code>ThreadPoolExecutor</code> by hand with a bounded queue.</p>
+
+<h3>4. WorkStealingPool executor</h3>
+<ul><li>It creates a <b>ForkJoinPool</b> executor.</li></ul>
+<div class="diag">
+<div class="row"><div class="cb">Big task</div></div>
+<div class="row"><div class="cb sm">fork()</div><div class="cb sm">fork()</div><div class="cb sm">fork()</div></div>
+<div class="row"><div class="cb sm">sub-task</div><div class="cb sm">sub-task</div><div class="cb sm">sub-task</div></div>
+<div class="row"><div class="cb sm">fork()</div><div class="cb sm">fork()</div></div>
+<div class="row"><div class="cb">join &rarr; final result</div></div></div>
+<p>Fork means <b>divide into smaller sub-tasks</b>. It brings more parallelism: multiple threads can work on a task.</p>
+
+<h2>How work stealing works</h2>
+<p>The thread pool has a shared <b>submission queue</b>, and <b>each thread maintains its own work-stealing queue</b> (a deque).</p>
+<ol>
+<li>Task 1 goes to T1. Task 2 goes to T2 (it is recursive: it can be divided into sub-tasks). Task 3 stays in the submission queue.</li>
+<li>Task 2 splits into subtask 1 and subtask 2. T2 takes subtask 1; for now no thread is available, so T2 puts subtask 2 into <b>its own work-stealing queue</b>.</li>
+<li>Now let's say Task 1 is completed (to be more precise, T1's execution is complete). T1 first checks its own work-stealing queue: nothing. Then it checks the submission queue: Task 3 is waiting, so it picks it.</li>
+<li>Now say Task 3 is also completed while subtask 1 is still running. T1 again checks its own queue (nothing) and the submission queue (nothing).</li>
+<li>Now T1 asks: <b>can I steal some task from a busy thread?</b> It takes subtask 2 from Thread 2's queue and works on it.</li>
+</ol>
+<div class="box ex"><strong>Why it is efficient</strong>
+<p>Owners take from their own end of the deque, thieves take from the opposite end, so contention is tiny and idle threads are never wasted.</p></div>
+
+<h3>Writing a fork-join task</h3>
+<p>Tasks can be split into multiple small sub-tasks. For that the task should extend:</p>
+<ul>
+<li><b>RecursiveTask</b> &rarr; <b>returns a value</b> (then we go for this)</li>
+<li><b>RecursiveAction</b> &rarr; does <b>not</b> return a value (then we go for this)</li>
+</ul>
+<p>Both are subclasses of <code>ForkJoinTask</code>.</p>
+<pre><code class="java">class ComputeSumTask extends RecursiveTask&lt;Integer&gt; {      // Integer = return type
+    // computes sum from start to end: 1+2+3 ... 10
+    int start;
+    int end;
+
+    ComputeSumTask(int start, int end) {
+        this.start = start;
+        this.end = end;
+    }
+
+    @Override
+    protected Integer compute() {                 // main method that does the things
+        if (end - start &lt;= 4) {                   // small enough: do it directly
+            int totalSum = 0;
+            for (int i = start; i &lt;= end; i++) {
+                totalSum += i;
+            }
+            return totalSum;
+        } else {
+            // split the task
+            int mid = (start + end) / 2;
+            ComputeSumTask leftTask  = new ComputeSumTask(start, mid);        // only creates the object, does not call compute
+            ComputeSumTask rightTask = new ComputeSumTask(mid + 1, end);
+
+            leftTask.fork();                      // submits the task to the ForkJoinPool's work queue,
+            rightTask.fork();                     // then an available thread calls compute(): fork the subtasks for parallel execution
+
+            // combine the results
+            int leftResult  = leftTask.join();    // wait until the task finishes and return the result
+            int rightResult = rightTask.join();
+            return leftResult + rightResult;
+        }
+    }
+}</code></pre>
+<p><code>fork()</code> does <b>not</b> immediately create a new thread. Instead it (a) places the task in a work-stealing queue and (b) existing pool threads execute it. That is why ForkJoinPool is very efficient.</p>
+<pre><code class="java">// way 1: Executors.newWorkStealingPool()
+//   by default: number of available processors (can also give the number of parallel threads here)
+//   it uses ForkJoinPool internally, and its threads are usually daemon threads
+ExecutorService pool = Executors.newWorkStealingPool();
+
+// another way:
+ForkJoinPool pool = ForkJoinPool.commonPool();
+Future&lt;Integer&gt; futureObj = pool.submit(new ComputeSumTask(0, 100));
+System.out.println(futureObj.get());</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p>A common optimisation is <code>left.fork(); int r = right.compute(); int l = left.join();</code>: the current thread does one half itself instead of just forking both. Parallel streams (<code>.parallelStream()</code>) and <code>CompletableFuture</code> default to the common ForkJoinPool.</p></div>
+
+<h2>shutdown vs awaitTermination vs shutdownNow</h2>
+<h3>shutdown()</h3>
+<ol>
+<li>Initiates an <b>orderly shutdown</b> of the ExecutorService.</li>
+<li>After calling <code>shutdown</code>, the executor will <b>not accept new task submission</b>.</li>
+<li>Already submitted tasks will continue to execute. It does not impact already running tasks.</li>
+</ol>
+<pre><code class="java">ExecutorService poolObj = Executors.newFixedThreadPool(5);
+poolObj.submit(() -&gt; { /* some work */ });
+poolObj.shutdown();                              // continue working
+poolObj.submit(() -&gt; { /* some work */ });       // throws RejectedExecutionException</code></pre>
+
+<h3>awaitTermination()</h3>
+<ol>
+<li>It is an <b>optional</b> functionality. Returns true/false.</li>
+<li>It is used <b>after</b> calling the <code>shutdown</code> method.</li>
+<li><b>Blocks the calling thread</b> for a specific timeout period, and waits for the ExecutorService to shut down.</li>
+<li>Returns true if the ExecutorService gets shut down within the timeout, else false.</li>
+</ol>
+<pre><code class="java">poolObj.shutdown();
+boolean isTerminated = poolObj.awaitTermination(2, TimeUnit.SECONDS);
+// false if the pool thread is taking, say, 5 seconds; true if it completes within 2 seconds</code></pre>
+
+<h3>shutdownNow()</h3>
+<ol>
+<li>Best-effort attempt to <b>stop/interrupt</b> the actively executing tasks.</li>
+<li>Halts the processing of tasks which are waiting.</li>
+<li>Returns the list of tasks which are awaiting execution (the ones still in the queue).</li>
+</ol>
+<p>It is called "best effort" because it interrupts threads, but <b>if the task ignores interrupts, it may continue working</b>. Like <code>Thread.sleep()</code> is an interruptible operation, but suppose the task is <code>while (true) { ... }</code>: <code>shutdownNow()</code> cannot force-stop it, because Java cannot kill threads safely, it only <b>sends an interrupt signal</b>.</p>
+<pre><code class="java">// the standard clean-shutdown recipe
+pool.shutdown();
+try {
+    if (!pool.awaitTermination(30, TimeUnit.SECONDS)) {
+        pool.shutdownNow();
+    }
+} catch (InterruptedException e) {
+    pool.shutdownNow();
+    Thread.currentThread().interrupt();
+}</code></pre>
+<table>
+<tr><th></th><th>shutdown()</th><th>awaitTermination()</th><th>shutdownNow()</th></tr>
+<tr><td>New tasks</td><td>rejected</td><td>(no effect)</td><td>rejected</td></tr>
+<tr><td>Running tasks</td><td>finish</td><td>blocks caller until they do or time out</td><td>interrupted</td></tr>
+<tr><td>Queued tasks</td><td>still run</td><td>-</td><td>dropped and returned as a list</td></tr>
+<tr><td>Blocks?</td><td>no</td><td>yes</td><td>no</td></tr>
+</table>
+
+<h2>ScheduledThreadPoolExecutor</h2>
+<p>Helps to <b>schedule</b> tasks. <code>ScheduledThreadPoolExecutor</code> extends <code>ThreadPoolExecutor</code>; the methods present other than those of the parent are:</p>
+<h3>(i) schedule(Runnable command, long delay, TimeUnit unit)</h3>
+<p>A <b>one-time</b> task runs after the delay.</p>
+<pre><code class="java">ScheduledExecutorService poolObj = Executors.newScheduledThreadPool(5);   // min threads; max here can be Integer.MAX_VALUE
+
+poolObj.schedule(() -&gt; {
+    System.out.println("Hello");
+}, 5, TimeUnit.SECONDS);</code></pre>
+<h3>(ii) schedule(Callable&lt;V&gt; callable, long delay, TimeUnit unit)</h3>
+<p>Returns a value.</p>
+<pre><code class="java">Future&lt;String&gt; fo = poolObj.schedule(() -&gt; {
+    return "Hello";
+}, 5, TimeUnit.SECONDS);
+try {
+    System.out.println(fo.get());
+} catch (Exception e) { }</code></pre>
+<h3>(iii) scheduleAtFixedRate</h3>
+<pre><code class="java">Future&lt;?&gt; fo = poolObj.scheduleAtFixedRate(() -&gt; {
+    System.out.println("Hello");
+}, 3, 5, TimeUnit.SECONDS);          // 3 = initialDelay, 5 = period
+
+fo.cancel(true);                     // we can use this to interrupt it</code></pre>
+<p>Suppose the first iteration took 10 seconds: the next task will wait in the queue and start as soon as the previous one is finished.</p>
+<h3>(iv) scheduleWithFixedDelay</h3>
+<p>Very much similar to the above one, but here it runs <b>n seconds (or whatever unit we gave) after the previous has completed its execution</b>.</p>
+<div class="flow"><b>Fixed rate</b><i>start to start</i><b>every 5s regardless of run time</b></div>
+<div class="flow"><b>Fixed delay</b><i>end to start</i><b>5s gap after each run finishes</b></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why avoid Executors.newFixedThreadPool in production?</summary><p>Unbounded LinkedBlockingQueue can eat all memory under load; cached pool can create unlimited threads. Build a ThreadPoolExecutor with bounded queue and a rejection policy.</p></details>
+<details><summary>What is work stealing?</summary><p>Each worker has its own deque; idle workers steal tasks from the tail of busy workers' deques.</p></details>
+<details><summary>RecursiveTask vs RecursiveAction?</summary><p>RecursiveTask returns a result, RecursiveAction returns nothing.</p></details>
+<details><summary>scheduleAtFixedRate vs scheduleWithFixedDelay?</summary><p>Fixed rate measures from start to start; fixed delay waits after the previous run ends.</p></details>
+<details><summary>Does shutdownNow() always stop tasks?</summary><p>No. It only interrupts; tasks that ignore interrupts keep running.</p></details>
+</div>

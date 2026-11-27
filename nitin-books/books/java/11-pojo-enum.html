@@ -1,0 +1,150 @@
+<h1>POJO, Enum and Final Classes</h1>
+<p class="kicker">Three special kinds of class you will meet constantly.</p>
+
+<h2>POJO class</h2>
+<p><b>P</b>lain <b>O</b>ld <b>J</b>ava <b>O</b>bject.</p>
+<ol>
+<li>Contains <b>variables and their getter and setter methods</b>.</li>
+<li>Class should be <b>public</b>, with a <b>default public constructor</b>.</li>
+<li><b>No annotations</b> like <code>@Table</code>, <code>@Entity</code>, <code>@Id</code> etc. should be used.</li>
+<li>Should <b>not extend any class or implement any interface</b>.</li>
+</ol>
+<div class="box extra"><strong>Good to know</strong>
+<p>These are the strict textbook rules. In day-to-day work, people also call a simple data class with a few annotations a "POJO" (and call a JPA entity a "bean"). In interviews, give the strict definition first.</p></div>
+
+<h2>Enum class</h2>
+<ol>
+<li>Holds a <b>collection of CONSTANTS</b> (variables whose values cannot be changed).</li>
+<li>Constants are <b>static and final implicitly</b> (we don't have to write it).</li>
+<li>It <b>cannot extend any class</b>, as it internally extends <code>java.lang.Enum</code>.</li>
+<li>It <b>can implement interfaces</b>.</li>
+<li>It can have <b>variables, constructors, methods</b>.</li>
+<li>It <b>cannot be instantiated</b> with <code>new</code>: its constructor is always private (even if you don't write it, bytecode makes it private).</li>
+<li>No other class can extend an enum class.</li>
+<li>It <b>can have abstract methods</b>, and all the constants must implement that abstract method.</li>
+</ol>
+<p>In Java, even if one method is abstract, the class has to be abstract too, but the enum above is the exception.</p>
+
+<h3>Enum with an abstract method</h3>
+<pre><code class="java">public enum Operation {
+    ADD {
+        @Override
+        public int apply(int a, int b) { return a + b; }
+    },
+    SUBTRACT {
+        @Override
+        public int apply(int a, int b) { return a - b; }
+    };
+
+    public abstract int apply(int a, int b);   // not possible in a normal non-abstract class
+}
+
+Operation opAdd = Operation.ADD;      // reference to the single, pre-initialized ADD instance
+int result = opAdd.apply(5, 3);</code></pre>
+<p><code>ADD</code> is an object. In Java, <b>every enum constant is a singleton object of its enum type</b>. Loop over them like this:</p>
+<pre><code class="java">for (Operation op : Operation.values()) {
+    System.out.println(op.name());
+}</code></pre>
+
+<h3>Built-in methods</h3>
+<pre><code class="java">public enum EnumSample {
+    MONDAY,      // 0
+    TUESDAY,     // 1
+    WEDNESDAY,   // 2
+    THURSDAY,    // 3
+    FRIDAY,      // 4
+    SATURDAY,    // 5
+    SUNDAY;      // 6
+}</code></pre>
+<p>Internally they are assigned values starting from <b>zero</b>.</p>
+<table>
+<tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>values()</code></td><td>returns an <b>array</b> of all the constants</td></tr>
+<tr><td><code>ordinal()</code></td><td>the number assigned to it: 0, 1, 2 ...</td></tr>
+<tr><td><code>valueOf("FRIDAY")</code></td><td>gets the constant from its text</td></tr>
+<tr><td><code>name()</code></td><td>the constant's text</td></tr>
+</table>
+<pre><code class="java">for (EnumSample sample : EnumSample.values()) {
+    System.out.println(sample.ordinal());   // 0, 1, 2 ...
+}
+
+EnumSample enumVariable = EnumSample.valueOf("FRIDAY");
+System.out.println(enumVariable.name());    // FRIDAY</code></pre>
+<p>These must be <b>static internally</b>: we access them without an object.</p>
+<div class="box extra"><strong>Good to know</strong>
+<p><code>valueOf()</code> throws <code>IllegalArgumentException</code> if the text matches no constant. Avoid relying on <code>ordinal()</code> for storing in a database, because reordering the constants silently changes the numbers. Store <code>name()</code> instead (that is what <code>@Enumerated(EnumType.STRING)</code> does in JPA).</p></div>
+
+<h3>Enum with fields and a constructor</h3>
+<pre><code class="java">public enum EnumSample {
+    MONDAY(101, "1st day of the week"),
+    TUESDAY(102, "2nd day of the week");
+
+    private int val;
+    private String comment;
+
+    // always private; only used inside the class to initialise
+    // the constants (MONDAY, TUESDAY)
+    EnumSample(int val, String comment) {
+        this.val = val;
+        this.comment = comment;
+    }
+
+    // getters and setters: one set per constant, works for all constants
+    public int getVal() { return val; }
+    public String getComment() { return comment; }
+
+    public static EnumSample getEnumFromValue(int value) {
+        for (EnumSample sample : EnumSample.values()) {
+            if (sample.val == value) {
+                return sample;
+            }
+        }
+        return null;
+    }
+}
+
+String str = EnumSample.getEnumFromValue(101).getComment();   // static method, then getter</code></pre>
+
+<h3>Method override by a constant</h3>
+<p>A single constant can override a method on its own:</p>
+<pre><code class="java">public enum EnumSample {
+    MONDAY {
+        @Override
+        public void dummyMethod() {
+            System.out.println("-- Monday only --");
+        }
+    },
+    TUESDAY,
+    WEDNESDAY;
+
+    public void dummyMethod() {
+        System.out.println("-- default --");
+    }
+}</code></pre>
+
+<h3>Enum implementing an interface</h3>
+<pre><code class="java">public interface MyInterface {
+    public String toLowerCase();
+}
+
+public enum EnumSample implements MyInterface {
+    MONDAY, TUESDAY;
+
+    @Override
+    public String toLowerCase() {
+        return name().toLowerCase();
+    }
+}</code></pre>
+
+
+<h2>Final class</h2>
+<p>A class declared <code>final</code> <b>cannot be inherited</b>. Examples: <code>String</code>, all the wrapper classes.</p>
+<pre><code class="java">public final class Constants { }
+public class Other extends Constants { }   // ✗ compile error</code></pre>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why is an enum a good singleton and a good constant holder?</summary><p>The JVM creates each constant exactly once and guarantees it. Constants are type-safe, can carry data and behaviour, and work in <code>switch</code>.</p></details>
+<details><summary>Can an enum extend a class?</summary><p>No, it already extends <code>java.lang.Enum</code>. It can implement interfaces.</p></details>
+<details><summary>Can you call <code>new</code> on an enum?</summary><p>No, the constructor is implicitly private.</p></details>
+<details><summary>Name the final classes you know.</summary><p><code>String</code>, <code>Integer</code> and the other wrappers, <code>Math</code>.</p></details>
+</div>

@@ -1,0 +1,178 @@
+<h1>AOP: Aspect Oriented Programming</h1>
+<p class="kicker">Intercept a method call and run code before, after or around it, without touching the method itself.</p>
+
+<h2>What is AOP?</h2>
+<ul>
+<li>In simple terms, it helps to <b>intercept a method invocation</b> and perform some task <b>before and after</b> the method.</li>
+<li>It lets us focus on business logic by moving <b>boilerplate and repetitive code</b> (logging, transaction management and so on) elsewhere.</li>
+<li>An <b>Aspect</b> is a module that handles this repetitive code. It gives reusability and maintainability.</li>
+</ul>
+<p>Typical uses: <b>logging</b>, <b>transaction management</b>, <b>security</b>, auditing, timing and caching.</p>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-aop&lt;/artifactId&gt;
+&lt;/dependency&gt;</code></pre>
+
+<div class="box ex"><strong>The first aspect</strong>
+<pre><code class="java">@RestController
+@RequestMapping(value = "/api/")
+public class EmployeeController {
+
+    @GetMapping(path = "/fetchEmployee")
+    public String fetchEmployee() {
+        return "item fetched";
+    }
+}
+
+@Aspect
+@Component
+public class LoggingAspect {
+
+    @Before("execution(public String com.conceptandcoding.learningspringboot.EmployeeController.fetchEmployee())")
+    public void beforeMethod() {
+        System.out.println("inside beforeMethod Aspect");
+    }
+}</code></pre>
+<p>Calling <code>/api/fetchEmployee</code> prints "inside beforeMethod Aspect" first, and the browser shows "item fetched".</p></div>
+
+<h2>The vocabulary</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td><b>Aspect</b></td><td>The class holding the cross-cutting logic (<code>@Aspect</code>)</td></tr>
+<tr><td><b>Join point</b></td><td>A point where the actual method invocation happens</td></tr>
+<tr><td><b>Pointcut</b></td><td>An <b>expression</b> that tells <b>where</b> an advice should be applied</td></tr>
+<tr><td><b>Advice</b></td><td>The <b>action</b> taken: <code>@Before</code>, <code>@After</code> or <code>@Around</code> the method execution</td></tr>
+</table>
+
+<h2>Pointcut: the execution expression</h2>
+<p>Shape: <code>execution(modifiers? return-type declaring-type? method-name(params) throws?)</code>. The access modifier is optional and can be omitted; the <b>return type is mandatory</b> (use <code>*</code> for "any").</p>
+<table>
+<tr><th>Expression</th><th>Matches</th></tr>
+<tr><td><code>execution(public String com.x.Employee.fetchEmployee())</code></td><td>exactly that method</td></tr>
+<tr><td><code>execution(* com.x.Employee.fetchEmployee())</code></td><td>any return type</td></tr>
+<tr><td><code>execution(* com.x.Employee.*(String))</code></td><td>any method of Employee with a single String parameter</td></tr>
+<tr><td><code>execution(String com.x.Employee.fetchEmployee(*))</code></td><td><code>fetchEmployee</code> with any single parameter</td></tr>
+<tr><td><code>execution(String com.x.Employee.fetchEmployee(..))</code></td><td><code>fetchEmployee</code> with 0 or more parameters</td></tr>
+<tr><td><code>execution(String com.x..fetchEmployee())</code></td><td><code>fetchEmployee</code> in the package <code>com.x</code> and its sub-packages</td></tr>
+<tr><td><code>execution(String com.x..*())</code></td><td>any no-arg method in <code>com.x</code> and sub-packages</td></tr>
+</table>
+<ul>
+<li><code>(*)</code> wildcard matches <b>any single item</b>.</li>
+<li><code>(..)</code> wildcard matches <b>zero or more items</b>.</li>
+</ul>
+
+<h2>Types of pointcut designators</h2>
+<h3>1. execution</h3>
+<p>Matches a particular method in a particular class (above).</p>
+<h3>2. within</h3>
+<p>Matches <b>all methods within a class or package</b>.</p>
+<pre><code class="java">@Before("within(com.conceptandcoding.learningspringboot.Employee)")        // every method of Employee
+@Before("within(com.conceptandcoding.learningspringboot..*)")              // every method in package + subpackages</code></pre>
+<h3>3. @within</h3>
+<p>Matches any method in a class that <b>carries a given annotation</b>.</p>
+<pre><code class="java">@Aspect
+@Component
+public class LoggingAspect {
+    @Before("@within(org.springframework.stereotype.Service)")
+    public void beforeMethod() { System.out.println("inside beforeMethod aspect"); }
+}
+
+@Service
+public class EmployeeUtil {
+    public void employeeHelperMethod() { System.out.println("employee helper method called"); }
+}</code></pre>
+<p>Calling the controller, which calls <code>employeeUtil.employeeHelperMethod()</code>, prints the advice first, then "employee helper method called".</p>
+<h3>4. @annotation</h3>
+<p>Matches any <b>method</b> annotated with the given annotation.</p>
+<pre><code class="java">@Before("@annotation(org.springframework.web.bind.annotation.GetMapping)")
+public void beforeMethod() { ... }</code></pre>
+<h3>5. args</h3>
+<p>Matches methods by their <b>argument types</b>.</p>
+<pre><code class="java">@Before("args(String,int)")
+public void beforeMethod() { ... }
+
+// employeeUtil.employeeHelperMethod("xyz", 123)  -> advice runs
+
+@Before("args(com.conceptandcoding.learningspringboot.Employee)")     // object type instead of primitive</code></pre>
+<h3>6. @args</h3>
+<p>Matches methods whose <b>argument's class carries a given annotation</b>.</p>
+<pre><code class="java">@Before("@args(org.springframework.stereotype.Service)")
+// matches employeeHelperMethod(EmployeeDAO dao) when EmployeeDAO is annotated with @Service</code></pre>
+<h3>7. target</h3>
+<p>Matches methods on a particular <b>instance type</b> (the proxied target object), including an interface.</p>
+<pre><code class="java">@Before("target(com.conceptandcoding.learningspringboot.EmployeeUtil)")
+
+// by interface: both implementations match
+@Before("target(com.conceptandcoding.learningspringboot.IEmployee)")
+
+public interface IEmployee { void fetchEmployeeMethod(); }
+@Component("tempEmployee")  public class TempEmployee  implements IEmployee { ... }
+@Component("permaEmployee") public class PermaEmployee implements IEmployee { ... }</code></pre>
+
+<h3>Combining pointcuts</h3>
+<p>Use <code>&amp;&amp;</code> (and), <code>||</code> (or) and <code>!</code> (not).</p>
+<pre><code class="java">@Before("execution(* com.x.EmployeeUtil.*(..)) &amp;&amp; @annotation(com.x.Audited)")
+public void beforeAndMethod() { System.out.println("inside beforeAndMethod aspect"); }</code></pre>
+<h3>Named pointcuts</h3>
+<p>Define the expression once and reuse it by name.</p>
+<pre><code class="java">@Pointcut("execution(* com.conceptandcoding.learningspringboot.EmployeeUtil.*(..))")
+public void myPointcutName() { }
+
+@Before("myPointcutName()")
+public void beforeMethod() { System.out.println("inside beforeMethod aspect"); }</code></pre>
+
+<h2>Advice types</h2>
+<table>
+<tr><th>Advice</th><th>Runs</th></tr>
+<tr><td><code>@Before</code></td><td>before the method</td></tr>
+<tr><td><code>@After</code></td><td>after the method, whether it returned or threw (like <code>finally</code>)</td></tr>
+<tr><td><code>@AfterReturning</code></td><td>only after a successful return; can read the return value</td></tr>
+<tr><td><code>@AfterThrowing</code></td><td>only if the method threw an exception</td></tr>
+<tr><td><code>@Around</code></td><td><b>surrounds</b> the method: before and after, and it controls whether the method runs at all</td></tr>
+</table>
+<p><code>@Around</code> receives a <code>ProceedingJoinPoint</code>; calling <code>proceed()</code> runs the real method.</p>
+<pre><code class="java">@Aspect
+@Component
+public class TimingAspect {
+
+    @Around("execution(* com.conceptandcoding.learningspringboot.EmployeeUtil.*(..))")
+    public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
+        System.out.println("inside before Method aspect");
+        Object result = joinPoint.proceed();            // the real method runs here
+        System.out.println("inside after Method aspect");
+        return result;                                  // always return what the method returned
+    }
+}</code></pre>
+<p>Output order: "inside before Method aspect", "employee helper method called", "inside after Method aspect". Forgetting to return the result (or to call <code>proceed()</code>) silently breaks the caller.</p>
+
+<h2>How does the interception actually work?</h2>
+<p>Two natural questions: <i>how is the call intercepted?</i> and <i>with thousands of pointcuts, does every call get matched against all of them?</i> The answer is that matching happens <b>once, at startup</b>, not on every call.</p>
+<h3>At application startup</h3>
+<ol>
+<li>Spring looks for classes annotated with <code>@Aspect</code>.</li>
+<li>It <b>parses the pointcut expressions</b> (done by the <code>PointcutParser</code> class) and keeps them in an efficient data structure (a cache).</li>
+<li>It then looks at the <code>@Component</code>, <code>@Service</code>, <code>@Controller</code> ... classes and checks, for each, whether it is <b>eligible for interception</b> by any pointcut (done by <code>AbstractAutoProxyCreator</code>).</li>
+<li>If yes, it creates a <b>proxy</b> instead of the plain object, using a <b>JDK dynamic proxy</b> (when the class implements an interface) or a <b>CGLIB proxy</b> (subclass proxy).</li>
+</ol>
+<p>The proxy contains the code that runs the advice before the method, then the method itself, then any after-advice. The proxy is what gets injected into other beans.</p>
+<h3>When a request arrives</h3>
+<div class="flow"><b>Caller</b><i>calls the bean</i><b>Proxy (JDK / CGLIB)</b><i>runs the chain of advice</i><b>Before advice</b><i>proceed()</i><b>Real method</b><i>then</i><b>After advice</b></div>
+<ul>
+<li>The caller actually calls the <b>proxy</b>. The proxy runs the matching advice in the chain: for example the first <code>@Before</code>, then the next advice, then the method execution, then the <code>@After</code> advice.</li>
+<li>Only the classes that matched at startup are proxied, so non-matching beans cost nothing.</li>
+</ul>
+
+<div class="box extra"><strong>Gotchas (frequently asked)</strong>
+<ul>
+<li><b>Self-invocation:</b> a call from one method to another method <b>of the same class</b> (<code>this.other()</code>) does not go through the proxy, so the advice does not run. The same reason <code>@Transactional</code> and <code>@Async</code> seem to "not work" inside the same class.</li>
+<li>Spring AOP works only on <b>Spring beans</b> and only on <b>public method calls</b> through the proxy. Full AspectJ (compile/load-time weaving) removes these limits.</li>
+<li><code>private</code> and <code>final</code> methods (and final classes) cannot be proxied by CGLIB.</li>
+<li>Use <code>@Order</code> on an aspect to control the order when several aspects match.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What is AOP, and where have you used it?</summary><p>A way to separate cross-cutting concerns (logging, security, transactions, metrics) from business logic. Spring itself uses it for <code>@Transactional</code>, <code>@Async</code>, <code>@Cacheable</code> and method security.</p></details>
+<details><summary>Aspect vs advice vs pointcut vs join point?</summary><p>Aspect: the module. Advice: the action. Pointcut: the expression choosing where. Join point: the actual method execution being intercepted.</p></details>
+<details><summary>JDK dynamic proxy vs CGLIB?</summary><p>JDK proxies implement the target's interfaces; CGLIB generates a subclass of the target class. Spring Boot defaults to CGLIB (<code>spring.aop.proxy-target-class=true</code>).</p></details>
+<details><summary>Why doesn't my advice run on an internal method call?</summary><p>Self-invocation bypasses the proxy. Move the method to another bean, or inject the bean into itself/use AspectJ.</p></details>
+</div>

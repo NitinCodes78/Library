@@ -1,0 +1,101 @@
+<h1>Project Lombok</h1>
+<p class="kicker">Let annotations write the boilerplate.</p>
+
+<p>A Java library which helps to <b>reduce boilerplate code using annotations</b>. During compilation, it processes the annotations and <b>injects code into our Java classes</b> (works from Java 6 onwards).</p>
+<pre><code class="java">import lombok.val;
+public static void main(String[] args) {
+    val temp = "hello";        // IntelliJ may show an error here...
+    System.out.println(temp);  // ...but it compiles properly and temp is printed
+}</code></pre>
+<p>It's because Lombok adds the code <b>during compile time</b>, but our IDE does not see the code which Lombok generates, so it shows a red error even though compilation works fine. In the <code>.class</code> file it is simply <code>String temp = "hello";</code>.</p>
+<div class="box extra"><strong>IDE setup</strong>
+<p>We may have to add the Lombok plugin to our IDE and enable <b>annotation processing</b> so that the IDE simulates what Lombok generates.</p></div>
+
+<h2>Most used features</h2>
+<h3>1. val and var</h3>
+<p>Instead of actually writing the type, we can use these as the type of a local variable declaration. The type will be <b>inferred from the initializer expression</b>. Works only for <b>local variables</b> (not for fields or parameters).</p>
+<ul>
+<li><code>val</code>: marks the local variable <b>immutable</b> (variable made <code>final</code>).</li>
+<li><code>var</code>: local variable <b>not</b> marked as final.</li>
+</ul>
+<pre><code class="java">val a = 10;       // initialization is required, as it infers the type from that itself
+a = 30;           // cannot assign, as it's final
+
+var b = 10;
+b = 30;           // fine</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p>Since Java 10 the language itself has <code>var</code>, so Lombok's <code>var</code> is rarely needed.</p></div>
+
+<h3>2. @NonNull</h3>
+<p>Throws <b>NPE</b> if the value is null. Can be used on parameters of a method or constructor.</p>
+<div class="diag"><div class="row">
+<div class="cb wide"><code>void func(@NonNull String name) {<br>&nbsp;&nbsp;System.out.println(name);<br>}</code></div>
+<div class="cb">&rarr; in the .class &rarr;</div>
+<div class="cb wide"><code>void func(@NonNull String name) {<br>&nbsp;&nbsp;if (name == null) { throw new NullPointerException(...); }<br>&nbsp;&nbsp;System.out.println(name);<br>}</code></div></div></div>
+
+<h3>3. Getters and setters</h3>
+<pre><code class="java">class Test {
+    @Getter @Setter
+    String name;
+
+    @Getter @Setter
+    boolean flag;
+}</code></pre>
+<p>By default getters and setters are <b>public</b>, but we can control it:</p>
+<pre><code class="java">@Getter(AccessLevel.PRIVATE) @Setter(AccessLevel.PROTECTED)
+String name;</code></pre>
+<p>It can be applied at <b>class level</b> too; then:</p>
+<ul>
+<li><code>@Getter</code> will be applied to all <b>non-static</b> fields.</li>
+<li><code>@Setter</code> will be applied to all <b>non-static and non-final</b> fields.</li>
+</ul>
+<p>While using the annotation at class level, if we want to skip the default generation for any field, we can do that by using <code>AccessLevel.NONE</code>:</p>
+<pre><code class="java">@Getter @Setter
+public class Test {
+    @Setter(AccessLevel.NONE)
+    String name;
+    // other fields ...
+}</code></pre>
+
+<h3>4. @ToString</h3>
+<pre><code class="java">@ToString
+public class TestPo {
+    String name;
+    boolean flag;
+}
+// class file gets: public String toString() { ... }</code></pre>
+<p>Excluding any specific field:</p>
+<pre><code class="java">@ToString.Exclude
+boolean flag;</code></pre>
+
+<h3>5. Constructors</h3>
+<table>
+<tr><th>Annotation</th><th>Generates</th></tr>
+<tr><td><code>@NoArgsConstructor</code></td><td>a no-args constructor</td></tr>
+<tr><td><code>@RequiredArgsConstructor</code></td><td>a constructor with <b>only <code>final</code> and <code>@NonNull</code> fields</b></td></tr>
+<tr><td><code>@AllArgsConstructor</code></td><td>a constructor with <b>all fields</b></td></tr>
+</table>
+
+<h3>6. @EqualsAndHashCode</h3>
+<p>By default, it uses all <b>non-static and non-transient</b> fields.</p>
+
+<h3>7. @Data</h3>
+<p>A shortcut for:</p>
+<ul>
+<li><code>@ToString</code></li>
+<li><code>@EqualsAndHashCode</code></li>
+<li><code>@Getter</code> on all fields</li>
+<li><code>@Setter</code> on all non-final fields</li>
+<li><code>@RequiredArgsConstructor</code></li>
+</ul>
+<div class="box extra"><strong>Also worth knowing</strong>
+<ul>
+<li><code>@Value</code>: the immutable version of @Data (all fields private final, class final, no setters). This is how Lombok gives an immutable class.</li>
+<li><code>@Builder</code>: generates the builder pattern. <code>@Slf4j</code>: gives a <code>log</code> field.</li>
+<li>With JPA entities, avoid <code>@Data</code>: generated <code>equals/hashCode/toString</code> over lazy relations can trigger extra queries or infinite recursion.</li>
+</ul></div>
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>How does Lombok work?</summary><p>It is an annotation processor that hooks into the compiler and modifies the syntax tree, so the generated methods exist in the .class file but not in the source.</p></details>
+<details><summary>@Data vs @Value?</summary><p>@Data makes a mutable bean (getters, setters, equals, hashCode, toString); @Value makes an immutable one.</p></details>
+<details><summary>Lombok vs records?</summary><p>Records are a language feature for immutable data carriers (no dependency, no setters possible). Lombok also covers mutable classes, builders, logging etc.</p></details>
+</div>

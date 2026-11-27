@@ -1,0 +1,77 @@
+<h1>@ConditionalOnProperty</h1>
+<p class="kicker">Create a bean only when a property says so: feature toggles without touching the code.</p>
+
+<p>The bean is created <b>conditionally</b>, meaning it may or may not be created.</p>
+
+<h2>The default behaviour</h2>
+<pre><code class="java">@Component
+public class MySQLConnection { public MySQLConnection() { System.out.println("initialization of MySQLConnection Bean"); } }
+
+@Component
+public class NoSQLConnection { public NoSQLConnection() { System.out.println("initialization of NoSQLConnection Bean"); } }
+
+@Component
+public class DBConnection {
+    @Autowired MySQLConnection mySQLConnection;
+    @Autowired NoSQLConnection noSQLConnection;
+
+    @PostConstruct
+    public void init() {
+        System.out.println("is MySQLConnection object Null: " + (mySQLConnection == null));
+        System.out.println("is NoSQLConnection object Null: " + (noSQLConnection == null));
+    }
+}</code></pre>
+<p>Both beans are created and injected: both "is ... Null: false".</p>
+
+<h2>Two use cases</h2>
+<ol>
+<li>We want to create <b>only one</b> bean, either <code>MySQLConnection</code> or <code>NoSQLConnection</code>.</li>
+<li>We have <b>two components sharing the same codebase</b>, but one needs <code>MySQLConnection</code> and the other needs <code>NoSQLConnection</code>.</li>
+</ol>
+<p>The solution is <b><code>@ConditionalOnProperty</code></b>.</p>
+
+<pre><code class="java">@Component
+@ConditionalOnProperty(prefix = "mysql", name = "enabled", havingValue = "true")
+public class MySQLConnection { ... }
+
+@Component
+@ConditionalOnProperty(prefix = "nosql", name = "enabled", havingValue = "true")
+public class NoSQLConnection { ... }
+
+@Component
+public class DBConnection {
+    @Autowired(required = false)          // the bean may not exist
+    MySQLConnection mySQLConnection;
+
+    @Autowired(required = false)
+    NoSQLConnection noSQLConnection;
+    ...
+}</code></pre>
+<pre><code>application.properties
+mysql.enabled=true
+nosql.enabled=false</code></pre>
+<p>Now only "initialization of MySQLConnection Bean" is printed, and the report shows <code>MySQLConnection</code> is not null and <code>NoSQLConnection</code> is <b>null</b>. Each deployment decides through its own <code>application.properties</code>.</p>
+
+<div class="box extra"><strong>Attributes worth knowing</strong>
+<ul>
+<li><code>havingValue</code>: the value that makes the condition true (by default any value except <code>false</code> counts as a match).</li>
+<li><code>matchIfMissing = true</code>: create the bean even when the property is absent (handy for "on by default" features).</li>
+<li>It also works on <code>@Bean</code> methods, not only on classes.</li>
+<li>Spring Boot's own auto-configuration uses the same idea, with <code>@ConditionalOnClass</code>, <code>@ConditionalOnMissingBean</code> and so on.</li>
+</ul></div>
+
+<div class="flow"><b>application.properties</b><i>property value</i><b>@ConditionalOnProperty</b><i>true</i><b>Bean created</b></div>
+
+<h2>Advantages and disadvantages</h2>
+<div class="cols2">
+<div class="card"><h4>Advantages</h4>
+<ol><li>Toggling of features</li><li>Avoids cluttering the application context with unnecessary beans</li><li>Saves memory</li><li>Reduces application startup time</li></ol></div>
+<div class="card"><h4>Disadvantages</h4>
+<ol><li>Misconfiguration can happen</li><li>Code complexity when overused</li><li>Multiple beans with the same configuration cause confusion</li><li>Complexity in managing</li></ol></div>
+</div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>How do you enable a feature only in one environment?</summary><p>Put a flag in that environment's properties file and guard the bean with <code>@ConditionalOnProperty</code> (or use a profile).</p></details>
+<details><summary>@ConditionalOnProperty vs @Profile?</summary><p>@Profile is tied to the active profile name (environment-wide). @ConditionalOnProperty checks any single property value, so it suits fine-grained feature flags.</p></details>
+<details><summary>What happens to an <code>@Autowired</code> field when the conditional bean is not created?</summary><p>The app fails to start unless the injection is optional (<code>required = false</code>, <code>Optional&lt;T&gt;</code> or <code>ObjectProvider&lt;T&gt;</code>).</p></details>
+</div>

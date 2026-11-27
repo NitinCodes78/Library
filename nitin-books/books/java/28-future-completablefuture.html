@@ -1,0 +1,171 @@
+<h1>Future, Callable and CompletableFuture</h1>
+<p class="kicker">Getting results back from async work, and chaining it.</p>
+
+<h2>The problem</h2>
+<pre><code class="java">ThreadPoolExecutor poolExecutor = new ThreadPoolExecutor(1, 1, 1, TimeUnit.HOURS,
+        new ArrayBlockingQueue&lt;&gt;(1), Executors.defaultThreadFactory(),
+        new ThreadPoolExecutor.AbortPolicy());
+
+// a new thread will be created and it will perform the task
+poolExecutor.submit(() -&gt; {
+    System.out.println("this is the task, which thread will execute");
+});
+// main thread will continue processing, it won't wait for the pool executor's thread to complete</code></pre>
+<p>Its return type is <code>Future</code>. Now what if the caller (main, in this case) wants to know the <b>status</b> of the task: whether it completed or failed? It is running in async mode, the pool executor does it.</p>
+
+<h2>Future</h2>
+<p>An interface which represents the <b>result of the async task</b>. It allows you to check if: (i) the computation is complete, (ii) get the result, (iii) take care of the exception, if any.</p>
+<pre><code class="java">Future&lt;?&gt; futureObj = poolExecutor.submit(() -&gt; {
+    System.out.println("this is the task, which thread will execute");
+});
+// status of the task which the caller created:
+System.out.println(futureObj.isDone());</code></pre>
+<table>
+<tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>boolean cancel(boolean mayInterrupt)</code></td><td>Attempts to cancel the execution of the task. Returns false if the task can't be cancelled (typically because the task already completed); returns true otherwise.</td></tr>
+<tr><td><code>boolean isCancelled()</code></td><td>Returns true if the task was cancelled before it completed.</td></tr>
+<tr><td><code>boolean isDone()</code></td><td>Returns true if the task completed. Completion may be due to normal termination, an exception or cancellation: in all of these cases this method returns true.</td></tr>
+<tr><td><code>V get()</code></td><td>Waits, if required, for the completion of the task (the <b>main thread blocks</b>). After the task completes, it retrieves the result if available. I.e. the current thread will pause (block) and wait until the computation is finished.</td></tr>
+<tr><td><code>V get(long timeout, TimeUnit unit)</code></td><td>Waits for at most the given timeout period. Throws <code>TimeoutException</code> if the timeout period finished and the task is not yet completed.</td></tr>
+</table>
+
+<h2>Three flavours of submit()</h2>
+<pre><code class="java">submit(Runnable)
+submit(Runnable, T)
+submit(Callable&lt;T&gt;)</code></pre>
+<div class="diag"><div class="row">
+<div class="cb wide"><b>Runnable</b><br><small>@FunctionalInterface<br><code>public interface Runnable { public abstract void run(); }</code></small></div>
+<div class="cb wide"><b>Callable&lt;V&gt;</b><br><small>@FunctionalInterface<br><code>public interface Callable&lt;V&gt; { V call() throws Exception; }</code></small></div></div></div>
+<h3>Callable</h3>
+<ul>
+<li>Callable represents the task which needs to be executed, just like Runnable.</li>
+<li>But the difference: <b>Runnable does not have any return type</b>; <b>Callable has the capability to return a value</b> (and it may throw a checked exception).</li>
+</ul>
+<pre><code class="java">// Callable: returns 45
+Future&lt;Integer&gt; fo = poolExecutor.submit(() -&gt; {
+    System.out.println("something");
+    return 45;
+});
+
+// vs Runnable: nothing returned
+Future&lt;?&gt; fo = poolExecutor.submit(() -&gt; {
+    System.out.println("something");
+});
+Object obj = fo.get();      // it will be null (nothing returned)</code></pre>
+
+<h3>2nd way: submit(Runnable task, T result)</h3>
+<pre><code class="java">List&lt;Integer&gt; output = new ArrayList&lt;&gt;();
+Future&lt;List&lt;Integer&gt;&gt; fo = poolExecutor.submit(() -&gt; {
+    output.add(100);
+    System.out.println("Task2 with Runnable & return object");
+}, output);                         // the result returned once the task completes
+
+try {
+    List&lt;Integer&gt; outputFromFo = fo.get();
+    System.out.println(outputFromFo.get(0));
+} catch (Exception e) { }</code></pre>
+<p>The above is a sort of workaround to return something, but <b>Callable is cleaner</b>:</p>
+<pre><code class="java">Future&lt;List&lt;Integer&gt;&gt; fo = poolExecutor.submit(() -&gt; {      // Callable
+    List&lt;Integer&gt; output = new ArrayList&lt;&gt;();
+    output.add(300);
+    return output;
+});</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p>When a task throws, <code>get()</code> wraps it in an <code>ExecutionException</code> (the real cause is <code>getCause()</code>). Future's weakness: <code>get()</code> blocks and you cannot chain steps. That is why CompletableFuture exists.</p></div>
+
+<h2>CompletableFuture</h2>
+<p>Introduced in Java 8 to help in <b>async programming</b>. We can consider it as an <b>advanced version of Future</b>, which provides additional capabilities like <b>chaining</b>. (It is a class that implements the interface <code>Future</code>.)</p>
+
+<h3>1. supplyAsync</h3>
+<pre><code class="java">public static &lt;T&gt; CompletableFuture&lt;T&gt; supplyAsync(Supplier&lt;T&gt; supplier)
+public static &lt;T&gt; CompletableFuture&lt;T&gt; supplyAsync(Supplier&lt;T&gt; supplier, Executor executor)</code></pre>
+<ul>
+<li>The <code>supplyAsync</code> method initiates an async operation.</li>
+<li>The <code>supplier</code> is executed <b>asynchronously in a separate thread</b>.</li>
+<li>If we want more control on threads, we can pass an <code>Executor</code> in the method.</li>
+<li>By default it uses the <b>shared ForkJoinPool</b> executor (the common pool), which dynamically adjusts its pool size based on processors.</li>
+</ul>
+<p>Supplier is defined in Java as:</p>
+<pre><code class="java">@FunctionalInterface
+public interface Supplier&lt;T&gt; {
+    T get();
+}</code></pre>
+<pre><code class="java">ThreadPoolExecutor poolExecutor = new ThreadPoolExecutor(/* ... */);
+
+CompletableFuture&lt;String&gt; asyncTask1 = CompletableFuture.supplyAsync(() -&gt; {
+    return "task completed";
+}, poolExecutor);
+
+System.out.println(asyncTask1.get());</code></pre>
+
+<h3>2. thenApply and thenApplyAsync</h3>
+<ul>
+<li>Apply a function to the <b>result of the previous async computation</b>.</li>
+<li>Returns a new <code>CompletableFuture</code> object.</li>
+</ul>
+<pre><code class="java">CompletableFuture&lt;String&gt; asyncTask1 = CompletableFuture.supplyAsync(() -&gt; {
+    // task which a thread needs to execute
+    return "Concept and ";
+}, poolExecutor).thenApply((String val) -&gt; {
+    // functionality which can work on the result of the previous async task
+    return val + "Coding";
+});</code></pre>
+<table>
+<tr><th><code>thenApply</code></th><th><code>thenApplyAsync</code></th></tr>
+<tr><td><b>Synchronous</b> execution: uses the <b>same thread</b> which completed the previous async task.</td><td><b>Asynchronous</b> execution: uses a <b>different thread</b> (from the fork-join pool if we do not provide the executor in the method call) to complete this function.</td></tr>
+<tr><td colspan="2">If multiple <code>thenApplyAsync</code> are used, ordering can't be guaranteed: they will run concurrently.</td></tr>
+</table>
+
+<h3>3. thenCompose and thenComposeAsync</h3>
+<ul>
+<li><b>Chain together dependent async operations.</b></li>
+<li>When the next async operation depends on the result of the previous result, we can tie them together.</li>
+<li>For async tasks, we can bring some <b>ordering</b> using this (i.e. the previous async must finish first).</li>
+<li><code>thenCompose</code>: same thread. <code>thenComposeAsync</code>: different thread, but ordering is kept.</li>
+</ul>
+<pre><code class="java">CompletableFuture&lt;String&gt; user  = CompletableFuture.supplyAsync(() -&gt; "user-42");
+CompletableFuture&lt;String&gt; order = user.thenCompose(id -&gt; CompletableFuture.supplyAsync(() -&gt; "orders of " + id));</code></pre>
+<div class="box extra"><strong>thenApply vs thenCompose</strong>
+<p>It is the <code>map</code> vs <code>flatMap</code> idea. If your function itself returns a CompletableFuture, use <code>thenCompose</code>; otherwise you get a nested <code>CompletableFuture&lt;CompletableFuture&lt;T&gt;&gt;</code>.</p></div>
+
+<h3>4. thenAccept and thenAcceptAsync</h3>
+<ul>
+<li>Generally the <b>end stage</b> in the chain of async operations.</li>
+<li>It <b>does not return anything</b> (<code>CompletableFuture&lt;Void&gt;</code>).</li>
+<li><code>thenAccept</code>: same thread; <code>thenAcceptAsync</code>: new thread.</li>
+</ul>
+<pre><code class="java">CompletableFuture&lt;Void&gt; asyncTask1 = CompletableFuture.supplyAsync(() -&gt; {
+    return "Concept &";
+}, poolExecutor)
+.thenAccept((String val) -&gt; System.out.println("All stages completed"));</code></pre>
+
+<h3>5. thenCombine and thenCombineAsync</h3>
+<p>Used to <b>combine the results of 2 independent CompletableFutures</b>. (<code>thenCombine</code>: synchronous / same thread; <code>thenCombineAsync</code>: new thread.)</p>
+<pre><code class="java">CompletableFuture&lt;Integer&gt; asyncTask1 = CompletableFuture.supplyAsync(() -&gt; {
+    return 10;
+}, poolExecutor);
+
+CompletableFuture&lt;String&gt; asyncTask2 = CompletableFuture.supplyAsync(() -&gt; {
+    return "K";
+}, poolExecutor);
+
+CompletableFuture&lt;String&gt; combinedFutureObj = asyncTask1.thenCombine(asyncTask2,
+        (Integer val1, String val2) -&gt; val1 + val2);       // "10K"</code></pre>
+<table>
+<tr><th>Method</th><th>Takes</th><th>Returns</th><th>Use for</th></tr>
+<tr><td>supplyAsync</td><td>Supplier</td><td>CF&lt;T&gt;</td><td>start an async task with a result</td></tr>
+<tr><td>thenApply</td><td>Function</td><td>CF&lt;U&gt;</td><td>transform the previous result</td></tr>
+<tr><td>thenCompose</td><td>Function returning CF</td><td>CF&lt;U&gt;</td><td>dependent async step</td></tr>
+<tr><td>thenAccept</td><td>Consumer</td><td>CF&lt;Void&gt;</td><td>final consumer</td></tr>
+<tr><td>thenCombine</td><td>other CF + BiFunction</td><td>CF&lt;V&gt;</td><td>merge two independent results</td></tr>
+</table>
+<div class="box extra"><strong>Also worth knowing</strong>
+<p><code>CompletableFuture.allOf(...)</code> waits for all, <code>anyOf(...)</code> for the first. Error handling: <code>exceptionally(ex -&gt; fallback)</code> and <code>handle((res, ex) -&gt; ...)</code>. Without an Executor argument, async tasks run on daemon threads of the common pool, so a short-lived main can exit before they finish.</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Runnable vs Callable?</summary><p>Runnable returns nothing and cannot throw checked exceptions; Callable returns a value and may throw.</p></details>
+<details><summary>Future vs CompletableFuture?</summary><p>Future can only poll or block on get(). CompletableFuture adds non-blocking chaining, combining, and error handling.</p></details>
+<details><summary>thenApply vs thenApplyAsync?</summary><p>thenApply runs on the thread that completed the previous stage; the Async version hands the step to another thread (pool).</p></details>
+<details><summary>thenApply vs thenCompose?</summary><p>map vs flatMap: use thenCompose when the next step itself returns a CompletableFuture.</p></details>
+<details><summary>Which pool does supplyAsync use by default?</summary><p>ForkJoinPool.commonPool(); pass your own Executor for control.</p></details>
+</div>

@@ -1,0 +1,209 @@
+<h1>JPA: Mapping Classes to Tables (Part 5)</h1>
+<p class="kicker">ddl-auto, @Table, @Column, @Id, composite keys and the id generation strategies (IDENTITY, SEQUENCE, TABLE).</p>
+
+<h2>spring.jpa.hibernate.ddl-auto</h2>
+<p>This setting tells Hibernate <b>how to create and manage the DB schema</b>.</p>
+<pre><code>spring.jpa.hibernate.ddl-auto=update</code></pre>
+<table>
+<tr><th>Value</th><th>Create schema</th><th>Update schema</th><th>Delete schema</th><th>Details</th></tr>
+<tr><td><code>none</code></td><td>no</td><td>no</td><td>no</td><td>Do nothing. <b>Good for production.</b></td></tr>
+<tr><td><code>update</code></td><td>yes</td><td>yes</td><td>no</td><td>Updates the schema without deleting existing data or schema. Good for the development environment.</td></tr>
+<tr><td><code>validate</code></td><td>no</td><td>no</td><td>no</td><td>At startup, matches entities against the DB schema and <b>throws an exception on mismatch</b>.</td></tr>
+<tr><td><code>create</code></td><td>yes</td><td>yes</td><td>yes</td><td>Drops and re-creates the schema at application startup.</td></tr>
+<tr><td><code>create-drop</code></td><td>yes</td><td>yes</td><td>yes</td><td>Creates the schema at startup and drops it at shutdown. Generally the default for in-memory databases like H2.</td></tr>
+</table>
+<p>For production prefer <code>none</code>/<code>validate</code> together with a migration tool (Flyway or Liquibase).</p>
+
+<h2>@Table</h2>
+<ul>
+<li><b>Optional.</b> If not defined, Hibernate generates the table name from the entity name, usually CamelCase to snake_case: <code>UserDetails</code> becomes <code>USER_DETAILS</code>.</li>
+<li>Attributes: <code>name</code>, <code>schema</code>, <code>catalog</code>, <code>uniqueConstraints</code>, <code>indexes</code>.</li>
+</ul>
+<pre><code class="java">@Table(name = "USER_DETAILS")
+@Entity
+public class UserDetails { /* fields, getters and setters */ }
+
+@Table(name = "USER_DETAILS", schema = "ONBOARDING")      // table inside the ONBOARDING schema
+@Entity
+public class UserDetails { ... }
+
+@Table(name = "USER_DETAILS",
+       schema = "ONBOARDING",
+       uniqueConstraints = {
+           @UniqueConstraint(columnNames = "phone"),
+           @UniqueConstraint(columnNames = {"name", "email"})      // the pair must be unique together
+       })
+@Entity
+public class UserDetails {
+    @Id Long id;
+    String name;
+    String email;
+    String phone;
+}
+
+@Table(name = "USER_DETAILS",
+       indexes = {
+           @Index(name = "index_phone", columnList = "phone"),
+           @Index(name = "index_name_email", columnList = "name, email")
+       })
+@Entity
+public class UserDetails { ... }</code></pre>
+<p>You can verify each one in the H2 console through <code>INFORMATION_SCHEMA</code> (for example <code>CONSTRAINT_COLUMN_USAGE</code> and <code>INDEX_COLUMNS</code>): the unique constraints and indexes show up as generated.</p>
+
+<h2>@Column</h2>
+<p>Optional too: if not defined, JPA adds the column with default values.</p>
+<pre><code class="java">@Table(name = "user_details")
+public class UserDetails {
+    @Id
+    private Long id;
+
+    @Column(name = "full_name", unique = true, nullable = false, length = 255)
+    private String name;
+
+    private String email;
+    private String phone;
+}</code></pre>
+<p>The table gets the columns <code>ID, EMAIL, FULL_NAME, PHONE</code>. Other attributes: <code>insertable</code>, <code>updatable</code>, <code>precision</code>, <code>scale</code>, <code>columnDefinition</code>.</p>
+
+<h2>@Id</h2>
+<ul>
+<li>A <b>primary key</b> must be unique, not null and uniquely identify each record.</li>
+<li><code>@Id</code> marks the field as the primary key. An entity has <b>one primary key</b>, and only one field can be annotated with <code>@Id</code> (unless it is a composite key, below).</li>
+</ul>
+
+<h3>Composite primary key</h3>
+<p>A combination of two or more columns that together form the primary key. Two approaches: <b><code>@IdClass</code> with <code>@Id</code></b>, and <b><code>@Embeddable</code> with <code>@EmbeddedId</code></b>.</p>
+<p><b>Rules for both approaches:</b></p>
+<ul>
+<li>The key class must be <b>public</b>.</li>
+<li>It must implement <b><code>Serializable</code></b>.</li>
+<li>It must have a <b>no-arg constructor</b>.</li>
+<li>It must override <b><code>equals()</code> and <code>hashCode()</code></b>.</li>
+</ul>
+<div class="box extra"><strong>Why these rules?</strong>
+<ul>
+<li><b>equals/hashCode:</b> JPA keeps a first-level cache (and optionally a second-level one) in hash maps keyed by the primary key, so key equality must be exact.</li>
+<li><b>Serializable:</b> unlike a simple key like String or Long, a composite key is a custom class, and it must be serialisable in case it needs to travel over the network (distributed caching).</li>
+</ul></div>
+
+<h4>Approach 1: @IdClass and @Id</h4>
+<p>Say we want <code>name</code> and <code>address</code> to be the composite key:</p>
+<pre><code class="java">public class UserDetailsCK implements Serializable {
+    private String name;
+    private String address;
+
+    public UserDetailsCK() { }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof UserDetailsCK)) return false;
+        UserDetailsCK userCK = (UserDetailsCK) obj;
+        return this.name.equals(userCK.name) &amp;&amp; this.address.equals(userCK.address);
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(name, address); }
+}
+
+@Table(name = "user_details")
+@IdClass(UserDetailsCK.class)
+@Entity
+public class UserDetails {
+    @Id private String name;
+    @Id private String address;
+    private String phone;
+
+    public UserDetails() { }
+}</code></pre>
+<h4>Approach 2: @Embeddable and @EmbeddedId</h4>
+<pre><code class="java">@Embeddable
+public class UserDetailsCK implements Serializable {
+    private String name;
+    private String address;
+    public UserDetailsCK() { }
+    // equals() and hashCode() as above
+}
+
+@Table(name = "user_details")
+@Entity
+public class UserDetails {
+    @EmbeddedId
+    UserDetailsCK userDetailsCK;
+    private String phone;
+
+    public UserDetails() { }
+}</code></pre>
+<p>Both give a table with <code>ADDRESS, NAME, PHONE</code> and a primary key on (name, address). With <code>@EmbeddedId</code> the key is one object (<code>userDetails.getUserDetailsCK().getName()</code>); with <code>@IdClass</code> the fields are on the entity itself.</p>
+
+<h2>@GeneratedValue</h2>
+<p>We know how to define a primary key; we can also define how it is <b>generated</b>. By default primary key columns are <b>not auto-filled</b>. It works with <code>@Id</code> (single key, not with a composite key).</p>
+
+<h3>1. GenerationType.IDENTITY</h3>
+<p>Each insert generates a new identifier (an <b>auto-increment</b> column).</p>
+<pre><code class="java">@Table(name = "user_details")
+@Entity
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    private String phone;
+}</code></pre>
+
+<h3>2. GenerationType.SEQUENCE</h3>
+<ul>
+<li>Used to generate <b>unique numbers</b>.</li>
+<li>Efficient when we <b>cache sequence values</b>, and gives more control than IDENTITY.</li>
+</ul>
+<pre><code>CREATE SEQUENCE user_seq INCREMENT BY 25 START WITH 100 MAXVALUE 9999;</code></pre>
+<pre><code class="java">@Table(name = "user_details")
+@Entity
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "unique_user_seq")
+    @SequenceGenerator(name = "unique_user_seq", sequenceName = "db_seq_name",
+                       initialValue = 100, allocationSize = 5)
+    private Long id;
+    private String name;
+    private String phone;
+}</code></pre>
+<p>Posting two users gives ids <b>100</b> and <b>101</b>.</p>
+<ul>
+<li><b>name</b>: a unique name internal to JPA; it is what <code>generator</code> refers to (reusable across entities).</li>
+<li><b>sequenceName</b>: the name created in the DB (or the name of a sequence you already created manually).</li>
+<li><b>initialValue</b>: the number the sequence starts from.</li>
+<li><b>allocationSize</b>: Hibernate <b>prefetches</b> this many ids beforehand so it does not query the DB again and again.</li>
+</ul>
+<p>With <code>allocationSize = 5</code>, Hibernate asks the DB sequence once and hands out 5 ids from memory (1st to 5th call); only after the 5th call does it go to the DB again to fetch the next 5.</p>
+<div class="flow"><b>Insert 1 to 5</b><i>one sequence call, ids from memory</i><b>Insert 6</b><i>next sequence call</i><b>next 5 ids</b></div>
+<p><b>Advantages of SEQUENCE over IDENTITY:</b></p>
+<ol>
+<li><b>Custom logic</b> (start point, increment and so on).</li>
+<li>Sequence generation is <b>independent of the table</b>, so multiple tables can use it.</li>
+<li>A <b>range of ids can be cached</b>, so we avoid hitting the DB for each new id. (With IDENTITY, the DB auto-generates the id during the insert, which needs an additional DB call, and it also prevents Hibernate from batching inserts.)</li>
+<li><b>Better portability</b>: IDENTITY is very DB specific while SEQUENCE behaves more consistently across databases.</li>
+</ol>
+
+<h3>3. GenerationType.TABLE</h3>
+<p>Uses the <code>@TableGenerator</code> annotation, but it is <b>very inefficient</b>:</p>
+<ul>
+<li>A separate table is created just to manage unique ids.</li>
+<li>Each time an id is required, a SELECT-UPDATE is executed.</li>
+<li>Concurrency handling is complex: parallel operations need lock/unlock, which can become a performance bottleneck.</li>
+</ul>
+<p>In SEQUENCE the DB handles this internally with an atomic counter, so it is much more efficient.</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><code>GenerationType.AUTO</code> lets the provider choose (with Hibernate 6 it usually picks SEQUENCE where supported). MySQL has no sequences, so IDENTITY is the usual choice there.</li>
+<li>Use a wrapper type (<code>Long</code>, not <code>long</code>) for generated ids so that "not yet saved" can be <code>null</code>; that is how <code>save()</code> knows to <code>persist</code> instead of <code>merge</code>.</li>
+<li>Use <code>@Enumerated(EnumType.STRING)</code> for enum columns, never the default ordinal.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>ddl-auto values and what you'd use in production?</summary><p>none, validate, update, create, create-drop. In production use none or validate and manage the schema with Flyway/Liquibase.</p></details>
+<details><summary>IDENTITY vs SEQUENCE?</summary><p>IDENTITY is DB auto-increment: an id exists only after the insert (disables JDBC insert batching). SEQUENCE lets Hibernate pre-allocate id blocks (<code>allocationSize</code>), which is faster and batch-friendly.</p></details>
+<details><summary>Why override equals and hashCode for a composite key?</summary><p>Because entity caches are keyed by id; without value-based equality the same row would look like different keys.</p></details>
+<details><summary>@IdClass vs @EmbeddedId?</summary><p>@IdClass repeats the key fields on the entity and in a separate class; @EmbeddedId groups them in one embeddable object, which is neater to pass around.</p></details>
+</div>

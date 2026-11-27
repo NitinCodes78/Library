@@ -1,0 +1,144 @@
+<h1>Annotations</h1>
+<p class="kicker">Metadata you attach to code. Tools and frameworks read it with reflection and add logic.</p>
+
+<h2>What is an annotation?</h2>
+<p>Written with <code>@</code>.</p>
+<ol>
+<li>It is a kind of <b>adding metadata to the Java code</b>, which we can use <b>at runtime</b> to add certain logic.</li>
+<li>This metadata is <b>read using reflection</b>.</li>
+</ol>
+<div class="tree2">
+<div class="top">Annotations</div>
+<div class="kids">
+<div><b>Pre-defined</b><div class="kids sm"><div>Used on annotations (meta-annotations):<br>@Target, @Retention, @Documented, @Inherited, @Repeatable</div><div>Used on Java code (classes, methods, ...):<br>@Deprecated, @Override, @SuppressWarnings, @FunctionalInterface, @SafeVarargs</div></div></div>
+<div><b>Custom / user-defined</b><div class="kids sm"><div>@YourName, e.g. @Hello</div></div></div>
+</div></div>
+<p>The <b>5 built-in annotations used on Java code</b> are provided by Java, other than the ones from Spring, JPA etc.</p>
+
+<h2>Annotations used on Java code</h2>
+<h3>@Deprecated</h3>
+<ol>
+<li>Shows a <b>compile-time warning</b> on usage of deprecated classes or methods.</li>
+<li>It means there is no further improvement on this, and a <b>new alternative is present</b>.</li>
+<li>Can be used over: constructor, field, local variable, method, package, parameter, type (class, interface, enum).</li>
+</ol>
+<h3>@SuppressWarnings</h3>
+<pre><code class="java">@SuppressWarnings("deprecation")     // add it where a deprecated method is called, to suppress the warning
+@SuppressWarnings("unused")
+@SuppressWarnings("all")
+
+public class Main {
+    @SuppressWarnings("deprecation")
+    public static void main(String[] args) {
+        // calls deprecated stuff
+    }
+}</code></pre>
+<p>You can also use it on top of the <b>class</b> to suppress warnings in all the methods.</p>
+<p>Its scope is <b>lexical</b>: suppose <code>main</code> calls <code>B</code> and <code>B</code> calls <code>C</code>. Then it will suppress only for the <code>main</code> method, i.e. only <b>within those curly braces</b>.</p>
+
+<h3>@SafeVarargs</h3>
+<ul>
+<li>Used to suppress the <b>"heap pollution" warning</b>.</li>
+<li>Used over <b>constructors and methods</b> which have <b>variable arguments</b> as parameter.</li>
+<li>Method should be either <b>static or final</b> (i.e. methods which cannot be overridden).</li>
+<li>In <b>Java 9</b>, we can use it on <b>private methods</b> too.</li>
+</ul>
+<h4>Heap pollution</h4>
+<p>An object of one type (example <code>String</code>) storing the reference of another type of object (example <code>Integer</code>).</p>
+<pre><code class="java">List&lt;Integer&gt; list = new ArrayList&lt;&gt;();
+list.add(1);  list.add(2);
+List ls = list;               // raw (non-generic) list: any change in ls is now reflected in list too
+
+ls.add("Hello");              // but list was of type Integer!</code></pre>
+<p>The above code <b>compiles successfully</b> but is an example of heap pollution (and it fails later, when someone reads that element as an <code>Integer</code>).</p>
+<p>This does <b>not</b> happen with <code>Integer[]</code> arrays, because arrays check everything at runtime, whereas <b>generics erase their types at runtime</b> (type erasure). <code>List&lt;Integer&gt;</code> is treated just like <code>List</code> at runtime: once we get away from the compiler (fooled it), generics are no help.</p>
+
+<h2>Meta annotations</h2>
+<h3>1. @Target</h3>
+<p>Restricts <b>where to use the annotation</b> when defining a custom annotation.</p>
+<pre><code class="java">@Target(ElementType.METHOD)
+public @interface Override { }       // @interface is the way to define a custom annotation
+
+@Target({ElementType.CONSTRUCTOR, ElementType.METHOD})
+public @interface SafeVarargs { }
+
+@Target(ElementType.ANNOTATION_TYPE) // can be used only on another annotation</code></pre>
+<h3>2. @Retention</h3>
+<p>Tells <b>how long the annotation will be stored</b>.</p>
+<table>
+<tr><th>Policy</th><th>Meaning</th></tr>
+<tr><td><code>SOURCE</code></td><td>Discarded by the <b>compiler</b> itself; not recorded in the <code>.class</code> file.</td></tr>
+<tr><td><code>CLASS</code></td><td>Recorded in the <code>.class</code> file but <b>ignored by the JVM</b> at run time, so no reflection (reflection happens at runtime).</td></tr>
+<tr><td><code>RUNTIME</code></td><td>Recorded in the <code>.class</code> file <b>and available during run time</b>, so reflection can be used.</td></tr>
+</table>
+<div class="flow"><b>.java</b><i>compile</i><b>.class</b><i>run</i><b>JVM</b></div>
+<pre><code class="java">@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.SOURCE)
+public @interface Override { }
+
+// Eagle.java                          // Eagle.class
+public class Eagle implements Bird {   public class Eagle implements Bird {
+    @Override                              // not there in .class
+    public void fly() { }                  public void fly() { }
+}                                      }</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p>If you don't write <code>@Retention</code>, the default is <b><code>CLASS</code></b>. Spring and JPA annotations are all <code>RUNTIME</code>, since the framework reads them while your app is running.</p></div>
+
+<h3>3. @Documented</h3>
+<p>By default, annotations are <b>ignored when Java Documentation is generated</b> (Javadoc is just a tool to generate documentation of your method/class). With this, even annotations will come in the Javadocs. It's put on top of <code>@SafeVarargs</code>, so wherever I use <code>@SafeVarargs</code>, I'll see the annotation in the generated documentation.</p>
+<h3>4. @Inherited</h3>
+<p>Only used on a <b>class</b>. By default, annotations applied on a parent class are <b>not available to child classes</b>, but they are after this meta-annotation.</p>
+<h3>5. @Repeatable</h3>
+<p>Allows us to use the <b>same annotation more than once</b> at the same place.</p>
+<pre><code class="java">@Repeatable(Categories.class)
+public @interface Category {
+    String name();
+}
+
+@Category(name = "Carnivore")
+@Category(name = "Bird")
+public class Eagle { }                // more than one
+
+// Container: we have to define it
+@Retention(RetentionPolicy.RUNTIME)
+@interface Categories {
+    Category[] value();               // must be named value; creates an array of annotation Category
+}
+
+Category[] categoryAnnotationArray =
+        new Eagle().getClass().getAnnotationsByType(Category.class);
+for (Category can : categoryAnnotationArray) {
+    System.out.println(can.name());
+}</code></pre>
+
+<h2>User-defined (custom) annotations</h2>
+<p>Using the keyword <code>@interface</code>. The "methods" inside are more like <b>fields</b>:</p>
+<ul>
+<li>No parameters, no body.</li>
+<li>Return type is restricted to <b>primitives, Class, String, enums, annotations</b> and arrays of these types.</li>
+</ul>
+<pre><code class="java">public @interface MyCustomAnnotation {
+    String name();                    // return type; no parameter, no body
+}
+
+@MyCustomAnnotation(name = "Testing")
+public class Eagle {
+    public void fly() { }
+}</code></pre>
+<div class="box ex"><strong>Putting it together: read a custom annotation</strong>
+<pre><code class="java">@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.TYPE)
+public @interface MyCustomAnnotation {
+    String name();
+}
+
+MyCustomAnnotation a = Eagle.class.getAnnotation(MyCustomAnnotation.class);
+System.out.println(a.name());         // Testing</code></pre>
+<p>Without <code>RUNTIME</code> retention, <code>getAnnotation</code> would return <code>null</code>. This is exactly what Spring does with <code>@Component</code>, <code>@Service</code> and friends.</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What are the three retention policies?</summary><p>SOURCE (compiler only), CLASS (in the .class file, not visible at runtime; the default), RUNTIME (visible through reflection).</p></details>
+<details><summary>How do frameworks like Spring use annotations?</summary><p>They scan classes, read RUNTIME annotations with reflection and act on them: create beans, wire dependencies, expose endpoints.</p></details>
+<details><summary>What is a marker annotation?</summary><p>An annotation with no elements, such as <code>@Override</code>.</p></details>
+<details><summary>What is a meta-annotation?</summary><p>An annotation applied to another annotation: <code>@Target</code>, <code>@Retention</code>, <code>@Documented</code>, <code>@Inherited</code>, <code>@Repeatable</code>.</p></details>
+</div>

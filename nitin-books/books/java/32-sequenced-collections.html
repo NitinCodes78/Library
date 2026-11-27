@@ -1,0 +1,66 @@
+<h1>SequencedCollection, SequencedSet and SequencedMap</h1>
+<p class="kicker">Java 21: one common way to reach the first and last element.</p>
+
+<p>These are <b>new interfaces added into the existing Java collection hierarchy</b> (Java 21+). In the notes' hierarchy diagram, the pink ones are the new interfaces and show where they fit in the old tree.</p>
+<div class="diag">
+<div class="row"><div class="cb">Iterable</div></div>
+<div class="row"><div class="cb">Collection</div></div>
+<div class="row"><div class="cb sm"><b>SequencedCollection</b> <small>(new)</small><br><small>extended by List and Deque</small></div><div class="cb sm">Set</div><div class="cb sm">Queue</div></div>
+<div class="row"><div class="cb sm">List<br><small>ArrayList, LinkedList, Vector (Stack)</small></div><div class="cb sm">Deque<br><small>ArrayDeque, LinkedList</small></div><div class="cb sm"><b>SequencedSet</b> <small>(new)</small><br><small>LinkedHashSet</small><br>&darr;<br>SortedSet &rarr; NavigableSet &rarr; TreeSet</div></div>
+<div class="row"><div class="cb sm">Map &rarr; HashMap, Hashtable</div><div class="cb sm"><b>SequencedMap</b> <small>(new)</small> &rarr; LinkedHashMap<br>&darr;<br>SortedMap &rarr; NavigableMap &rarr; TreeMap</div></div></div>
+
+<h2>Q1. What's the criterion for putting these interfaces at this specific place? Why were Queue and PriorityQueue left out?</h2>
+<p>Any collection which follows the conditions below can be termed <b>sequenced</b>:</p>
+<ol>
+<li><b>Predictable iteration:</b> elements are returned in a consistent and well-defined order every time we iterate. So if a collection maintains elements in <b>insertion order</b>, or <b>sorted order</b> (ascending or descending), it follows predictable iteration.</li>
+<li>The collection provides support to <b>access or manipulate the first and last element</b>.</li>
+<li>The collection supports a <b>reversible view</b>.</li>
+</ol>
+<ul>
+<li><b>Queue</b> follows FIFO: we can access the first element but not the last. So &#10007; (a reversible view is also not supported directly).</li>
+<li><b>PriorityQueue</b> fails all three conditions &#10007;. <b>HashSet</b> also fails &#10007;.</li>
+</ul>
+
+<h2>Q2. Why is LinkedHashSet put under SequencedSet and not directly under SequencedCollection?</h2>
+<p>Because <b>SequencedSet adds an additional contract: NO DUPLICATES</b>.</p>
+
+<h2>Q3. Why do we need them? What gap are we trying to fill?</h2>
+<p>If we observe the collections which are sequenced, we will find that they all offer <b>get first / get last, add (first/last), remove (first/last) and a reverse view</b> of the collection. But there was <b>no common interface</b>: each collection had its own method names, which is difficult to remember. That's one of the gaps which these fill.</p>
+<table>
+<tr><th>Before Java 21: get the last element</th><th>How</th></tr>
+<tr><td>List</td><td><code>list.get(list.size() - 1)</code></td></tr>
+<tr><td>Deque</td><td><code>deque.getLast()</code></td></tr>
+<tr><td>SortedSet</td><td><code>set.last()</code></td></tr>
+<tr><td>LinkedHashSet</td><td>iterate through the whole set!</td></tr>
+<tr><td><b>Java 21, all of them</b></td><td><code>getLast()</code></td></tr>
+</table>
+
+<h2>The methods</h2>
+<div class="diag"><div class="row">
+<div class="cb wide"><b>SequencedCollection&lt;E&gt;</b><br><small>
+<code>void addFirst(E e)</code><br><code>void addLast(E e)</code><br><code>E getFirst()</code><br><code>E getLast()</code><br><code>E removeFirst()</code><br><code>E removeLast()</code><br><code>SequencedCollection&lt;E&gt; reversed()</code></small></div>
+<div class="cb wide"><b>SequencedMap&lt;K,V&gt;</b><br><small>
+<code>Map.Entry&lt;K,V&gt; firstEntry()</code><br><code>Map.Entry&lt;K,V&gt; lastEntry()</code><br><code>Map.Entry&lt;K,V&gt; pollFirstEntry()</code><br><code>Map.Entry&lt;K,V&gt; pollLastEntry()</code><br><code>V putFirst(K k, V v)</code><br><code>V putLast(K k, V v)</code><br><code>SequencedSet&lt;K&gt; sequencedKeySet()</code><br><code>SequencedCollection&lt;V&gt; sequencedValues()</code><br><code>SequencedSet&lt;Map.Entry&lt;K,V&gt;&gt; sequencedEntrySet()</code><br><code>SequencedMap&lt;K,V&gt; reversed()</code></small></div></div>
+<div class="row"><div class="cb">&uarr; extends</div></div>
+<div class="row"><div class="cb wide"><b>SequencedSet&lt;E&gt;</b><br><small><code>SequencedSet&lt;E&gt; reversed()</code> (covariant override)</small></div></div></div>
+<pre><code class="java">List&lt;Integer&gt; list = new ArrayList&lt;&gt;(List.of(1, 2, 3));
+list.getFirst();          // 1
+list.getLast();           // 3
+list.addFirst(0);         // [0, 1, 2, 3]
+list.reversed();          // view: [3, 2, 1, 0]
+
+LinkedHashMap&lt;String,Integer&gt; map = new LinkedHashMap&lt;&gt;();
+map.put("a", 1); map.put("b", 2);
+map.firstEntry();         // a=1
+map.putFirst("z", 0);     // z moves to the front</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li><code>reversed()</code> returns a <b>view</b>, not a copy: changes show through both ways.</li>
+<li>Unmodifiable or fixed collections (e.g. <code>List.of</code>) throw <code>UnsupportedOperationException</code> on the add/remove methods; an empty collection throws <code>NoSuchElementException</code> from <code>getFirst()</code>.</li>
+<li>For <code>TreeSet</code>/<code>TreeMap</code> (sorted), <code>addFirst</code>/<code>putFirst</code> are unsupported, because position is decided by the comparator.</li>
+</ul></div>
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why is Queue not SequencedCollection?</summary><p>It only exposes the head, has no defined last-element access, and no reversed view.</p></details>
+<details><summary>What does SequencedSet add over SequencedCollection?</summary><p>The no-duplicates contract of a Set.</p></details>
+<details><summary>Which version introduced these?</summary><p>Java 21 (JEP 431).</p></details>
+</div>

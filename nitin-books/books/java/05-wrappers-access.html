@@ -1,0 +1,75 @@
+<h1>Wrapper Classes, final and Access Modifiers</h1>
+<p class="kicker">Turning primitives into objects, locking values, and deciding who can see what.</p>
+
+<h2>Wrapper classes</h2>
+<p>For each primitive type we have a <b>wrapper class</b>.</p>
+<table>
+<tr><th>Primitive</th><th>Wrapper (reference)</th></tr>
+<tr><td>int</td><td>Integer</td></tr><tr><td>char</td><td>Character</td></tr><tr><td>short</td><td>Short</td></tr><tr><td>byte</td><td>Byte</td></tr>
+<tr><td>long</td><td>Long</td></tr><tr><td>float</td><td>Float</td></tr><tr><td>double</td><td>Double</td></tr><tr><td>boolean</td><td>Boolean</td></tr>
+</table>
+
+<h3>Autoboxing and unboxing</h3>
+<div class="cols2">
+<div class="card"><h4>Autoboxing</h4><p>primitive → wrapper</p><pre><code class="java">int a = 10;
+Integer a1 = a;</code></pre></div>
+<div class="card"><h4>Unboxing</h4><p>reference → primitive</p><pre><code class="java">Integer x = 20;
+int x1 = x;</code></pre></div>
+</div>
+<p>Java does both automatically, so <code>list.add(10)</code> works on a <code>List&lt;Integer&gt;</code>:</p>
+<pre><code class="java">List&lt;Integer&gt; list = new ArrayList&lt;&gt;();
+list.add(10);        // 10 is a primitive, boxed automatically</code></pre>
+
+<h3>Why wrapper classes exist</h3>
+<ol>
+<li><b>Primitives vs references.</b> A <b>local</b> primitive lives on the stack, whereas objects live in the heap (a primitive <b>field</b> of an object lives inside that object, on the heap). Java always passes arguments by value: a primitive is copied, a reference is copied too, but both copies point to the <b>same object</b>, so a change made through it is seen by the caller. If I want a change to be reflected after the call, I need a mutable reference type (note that wrapper classes like <code>Integer</code> are themselves immutable, so <code>void f(Integer x) { x = 10; }</code> will not change the caller either; use your own class, an array or <code>AtomicInteger</code>).
+<pre><code class="java">int a = 5;
+void f(int x) { x = 10; }
+f(a);                  // a remains 5 only
+
+class X { int a = 5; }
+void f(X x) { x.a = 10; }   // it changes the object (reflected everywhere)</code></pre>
+This is the advantage of a non-primitive data type: <b>flexible memory management</b>.</li>
+<li><b>Collections.</b> They all work on reference data types (objects). They are built around OOPs, store and manage instances of classes, and generics work with objects.</li>
+<li><b>Null.</b> Reference types <b>can be null</b>.</li>
+</ol>
+
+
+<h2>final</h2>
+<p><code>final</code> makes a variable's value constant.</p>
+<pre><code class="java">static final int EMP_ID = 10;     // CONSTANT</code></pre>
+<p>Also: <b>final methods cannot be overridden</b>. Because it can't be changed, then why override.</p>
+
+<h2>Access modifiers</h2>
+<table>
+<tr><th>Modifier</th><th>Who can access</th></tr>
+<tr><td><b>public</b></td><td>Any class in <b>any package</b></td></tr>
+<tr><td><b>private</b></td><td>Methods <b>only in the same class</b></td></tr>
+<tr><td><b>protected</b></td><td>Other classes in the <b>same package</b>, or a <b>sub-class in a different package</b></td></tr>
+<tr><td><b>default</b> (nothing written)</td><td>Classes in the <b>same package</b></td></tr>
+</table>
+<div class="box ex"><strong>protected, with a subclass in another package</strong>
+<pre><code class="java">class B {                        // package one
+    protected void f1() { }
+}
+
+class A extends B {              // package two (different package, but a child of B)
+    void meow() {
+        f1();                    // allowed, because A is a subclass of B
+    }
+}</code></pre></div>
+<div class="visrow">
+<div><b></b><span>Same class</span><span>Same package</span><span>Subclass (other pkg)</span><span>Everywhere</span></div>
+<div><b>private</b><span class="y">✓</span><span>✗</span><span>✗</span><span>✗</span></div>
+<div><b>default</b><span class="y">✓</span><span class="y">✓</span><span>✗</span><span>✗</span></div>
+<div><b>protected</b><span class="y">✓</span><span class="y">✓</span><span class="y">✓</span><span>✗</span></div>
+<div><b>public</b><span class="y">✓</span><span class="y">✓</span><span class="y">✓</span><span class="y">✓</span></div>
+</div>
+<p class="sample">The grid above is a summary I added.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What is autoboxing? Any danger?</summary><p>Automatic conversion between a primitive and its wrapper. Danger: unboxing a <code>null</code> wrapper throws <code>NullPointerException</code>, and boxing inside big loops creates many objects.</p></details>
+<details><summary>Integer a = 127, b = 127; a == b? And 128?</summary><p>For 127 it is true (small values −128 to 127 are cached), for 128 it is false. Use <code>equals()</code> to compare wrappers.</p></details>
+<details><summary>Why can't a List hold int?</summary><p>Generics work only with reference types. <code>List&lt;int&gt;</code> is not allowed, so we use <code>List&lt;Integer&gt;</code> and autoboxing.</p></details>
+<details><summary>Difference between default and protected?</summary><p>Default is package-only. Protected is package plus subclasses in other packages.</p></details>
+</div>

@@ -1,0 +1,193 @@
+<h1>Dependency Injection</h1>
+<p class="kicker">Field, setter and constructor injection, why constructor injection wins, and how to fix circular and ambiguous dependencies.</p>
+
+<h2>What is Dependency Injection?</h2>
+<ul>
+<li>With DI we make our class <b>independent of its dependencies</b>.</li>
+<li>It removes the dependency on a <b>concrete implementation</b>: the dependency is injected from an external source (the Spring container).</li>
+</ul>
+
+<h3>The problem first</h3>
+<pre><code class="java">public class User {
+    Order order = new Order();           // User creates its own Order
+
+    public User() { System.out.println("initializing user"); }
+}
+public class Order {
+    public Order() { System.out.println("initializing Order"); }
+}</code></pre>
+<p>Issues with this structure:</p>
+<ol>
+<li><b>Tight coupling.</b> If the creation logic of <code>Order</code> changes (say <code>Order</code> later becomes an <b>interface</b> with many concrete classes such as <code>OnlineOrder</code>), the <code>User</code> class has to change too.</li>
+<li><b>It breaks the Dependency Inversion rule of SOLID</b>: do not depend on a concrete implementation, depend on an <b>abstraction</b>.</li>
+</ol>
+<pre><code class="java">public interface Order { }
+public class OnlineOrder implements Order { }
+public class OfflineOrder implements Order { }
+
+public class User {
+    Order order;                          // depends on the abstraction only
+
+    public User(Order orderObj) {         // handed in from outside
+        this.order = orderObj;
+    }
+}</code></pre>
+<p>In Spring Boot we achieve this through <b>Dependency Injection</b>. <code>@Autowired</code> first looks for a bean of the <b>required type</b>; if a bean is found, Spring injects it.</p>
+<div class="flow"><b>Configuration loaded</b><i>beans created</i><b>Application started</b><i>container injects dependency</i><b>Into the constructed bean</b></div>
+
+<h2>Three ways to inject</h2>
+<table>
+<tr><th></th><th>Field</th><th>Setter</th><th>Constructor</th></tr>
+<tr><td>How</td><td><code>@Autowired</code> on the field</td><td><code>@Autowired</code> on a setter</td><td>Constructor parameter</td></tr>
+<tr><td>Can be <code>final</code> / immutable</td><td>No</td><td>No</td><td><b>Yes</b></td></tr>
+<tr><td>Easy to unit test</td><td>Hard (needs reflection)</td><td>Easy</td><td><b>Easy</b></td></tr>
+<tr><td>Fully initialised object guaranteed</td><td>No</td><td>No</td><td><b>Yes</b></td></tr>
+<tr><td>Recommended</td><td>No</td><td>For optional dependencies</td><td><b>Yes, the default choice</b></td></tr>
+</table>
+
+<h3>1. Field injection</h3>
+<ul>
+<li>The dependency is set directly into the fields. Spring uses <b>reflection</b>: it iterates over the fields and resolves the dependency.</li>
+</ul>
+<pre><code class="java">@Component
+public class User {
+    @Autowired
+    Order order;
+}</code></pre>
+<p><b>Advantage:</b> very simple and easy to write.</p>
+<p><b>Disadvantages:</b></p>
+<ul>
+<li>Cannot be used with <b>immutable</b> (<code>final</code>) fields.</li>
+<li>Chances of <b>NullPointerException</b>: <code>new User().process()</code> outside Spring leaves <code>order</code> as <code>null</code>.</li>
+<li>Unit testing is difficult: there is no constructor or setter to pass a mock into, so you need reflection. That is what Mockito's <code>@InjectMocks</code> does internally.</li>
+</ul>
+<pre><code class="java">class UserTest {
+    @Mock
+    Order orderMockObj;
+    @InjectMocks
+    User user;
+
+    @BeforeEach
+    void setup() {
+        MockitoAnnotations.openMocks(this);   // (older code: initMocks)
+    }
+}</code></pre>
+
+<h3>2. Setter injection</h3>
+<pre><code class="java">@Component
+public class User {
+    Order order;
+
+    @Autowired
+    public void setOrder(Order order) {
+        this.order = order;
+    }
+}</code></pre>
+<p><b>Advantages:</b> the dependency can be <b>changed any time</b> after creation; testing is easy because a mock can be passed straight in.</p>
+<p><b>Disadvantages:</b></p>
+<ul>
+<li>The field cannot be <code>final</code>, so the class cannot be immutable.</li>
+<li>Harder to read and maintain: by convention an object should be fully initialised at creation, so this hurts readability.</li>
+</ul>
+
+<h3>3. Constructor injection (recommended)</h3>
+<p>The dependency is resolved <b>at the time the object is initialised</b>.</p>
+<pre><code class="java">@Component
+public class User {
+    private final Order order;
+
+    public User(Order order) {            // no @Autowired needed (one constructor)
+        this.order = order;
+    }
+}</code></pre>
+<ul>
+<li>When there is <b>only one constructor</b>, <code>@Autowired</code> on it is optional (since Spring 4.3).</li>
+<li>When there is <b>more than one constructor</b>, <code>@Autowired</code> on the one Spring should use is <b>mandatory</b>. Otherwise Spring looks for a default constructor and fails with "No default constructor found".</li>
+</ul>
+
+<div class="box extra"><strong>Why constructor injection is recommended</strong>
+<ol>
+<li><b>All mandatory dependencies exist at initialisation</b>, so the object is 100% fully initialised. No NPE at runtime, no unnecessary null checks.</li>
+<li><b>Immutable objects</b> are possible (<code>private final Order order</code>).</li>
+<li><b>Fail fast.</b> A missing dependency stops the application at startup (and with a plain <code>new User()</code> it fails at compile time), instead of surfacing at run time.</li>
+<li><b>Unit testing is easy</b>: <code>new User(Mockito.mock(Order.class))</code>.</li>
+</ol></div>
+<pre><code class="java">class UserTest {
+    Order orderMockObj;
+    User user;
+
+    @BeforeEach
+    void setup() {
+        orderMockObj = Mockito.mock(Order.class);
+        user = new User(orderMockObj);       // plain Java, no Spring needed
+    }
+}</code></pre>
+
+<h2>Common issues with DI</h2>
+<h3>1. Circular dependency</h3>
+<p><code>Order</code> needs <code>Invoice</code> and <code>Invoice</code> needs <code>Order</code>. Spring cannot build either first, and the app fails with <b>APPLICATION FAILED TO START: the dependencies of some of the beans in the application context form a cycle</b>.</p>
+<pre><code class="java">@Component
+public class Order {
+    @Autowired Invoice invoice;
+}
+@Component
+public class Invoice {
+    @Autowired Order order;
+}</code></pre>
+<div class="flow"><b>Order</b><i>needs</i><b>Invoice</b><i>needs</i><b>Order</b></div>
+<p><b>Solutions:</b></p>
+<ol>
+<li><b>Refactor first.</b> Move the common code both depend on into a separate class; this breaks the cycle and is the real fix.</li>
+<li><b><code>@Lazy</code> on the injection point.</b> Spring injects a <b>proxy</b> instead of creating the real bean at startup, and builds the real one on first use.
+<pre><code class="java">@Component
+public class Order {
+    @Autowired
+    @Lazy
+    Invoice invoice;
+}</code></pre></li>
+<li><b>Break the cycle with a setter and <code>@PostConstruct</code>.</b> Construct without the dependency, then wire it afterwards:
+<pre><code class="java">@Component
+public class Invoice {
+    public Order order;
+    public void setOrder(Order order) { this.order = order; }
+}
+@Component
+public class Order {
+    @Autowired Invoice invoice;
+
+    @PostConstruct
+    public void init() {
+        invoice.setOrder(this);          // wire the back-reference after construction
+    }
+}</code></pre></li>
+</ol>
+<p>Since Spring Boot 2.6, circular references are <b>prohibited by default</b> (the app fails at startup), so you cannot lean on setter or field injection to hide a cycle.</p>
+
+<h3>2. Unsatisfied / ambiguous dependency</h3>
+<p>When <code>Order</code> is an interface with several implementations, a bare <code>@Autowired Order order</code> fails: Spring does not know which implementation to inject.</p>
+<pre><code class="java">public interface Order { }
+
+@Component public class OnlineOrder implements Order { }
+@Component public class OfflineOrder implements Order { }</code></pre>
+<p><b>Solutions:</b></p>
+<ol>
+<li><b><code>@Primary</code></b>: mark one implementation as the default choice.
+<pre><code class="java">@Component
+@Primary
+public class OnlineOrder implements Order { }</code></pre></li>
+<li><b><code>@Qualifier</code></b>: name the one you want at the injection point (the default bean name is the class name with a lowercase first letter).
+<pre><code class="java">@Component
+public class User {
+    @Autowired
+    @Qualifier("offlineOrder")
+    Order order;
+}</code></pre></li>
+</ol>
+<p>If both are present, <code>@Qualifier</code> wins over <code>@Primary</code>.</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why is constructor injection preferred over field injection?</summary><p>Immutability, guaranteed non-null mandatory dependencies, fail-fast, and trivial unit testing without reflection or a Spring context.</p></details>
+<details><summary>How do you handle a circular dependency?</summary><p>Redesign (extract the shared logic into a third bean). As a workaround use <code>@Lazy</code> on one injection point, or a setter plus <code>@PostConstruct</code>.</p></details>
+<details><summary>What is the difference between @Primary and @Qualifier?</summary><p>@Primary marks the default bean when several of the same type exist; @Qualifier picks a specific bean by name at the injection point and takes precedence.</p></details>
+<details><summary>What exception do you get with two beans of the same type and no qualifier?</summary><p><code>NoUniqueBeanDefinitionException</code>. With none at all you get <code>NoSuchBeanDefinitionException</code> ("unsatisfied dependency").</p></details>
+</div>

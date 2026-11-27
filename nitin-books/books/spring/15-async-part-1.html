@@ -1,0 +1,156 @@
+<h1>@Async: Part 1</h1>
+<p class="kicker">Run a method in another thread, and which executor Spring really uses behind the scenes (it is not always SimpleAsyncTaskExecutor).</p>
+
+<h2>Thread pool in a nutshell</h2>
+<ul>
+<li>A thread pool is a <b>collection of threads</b> (workers) available to perform submitted tasks.</li>
+<li>When a task completes, the worker goes back to the pool and waits for a new task, so <b>threads are reused</b>.</li>
+<li>In Java it is created with <code>ThreadPoolExecutor</code>.</li>
+</ul>
+<div class="flow"><b>Application submits tasks</b><i>queue</i><b>Thread pool (worker threads)</b><i>finished task, worker waits again</i><b>reuse</b></div>
+<pre><code class="java">int minPoolSize = 2;
+int maxPoolSize = 4;
+int queueSize = 3;
+ThreadPoolExecutor poolTaskExecutor = new ThreadPoolExecutor(minPoolSize, maxPoolSize,
+        1, TimeUnit.HOURS, new ArrayBlockingQueue&lt;&gt;(queueSize));</code></pre>
+
+<h2>The @Async annotation</h2>
+<ul>
+<li>Marks a method that should run <b>asynchronously</b>.</li>
+<li>It runs in a <b>new thread</b>, without blocking the main (caller) thread.</li>
+</ul>
+<pre><code class="java">@SpringBootApplication
+@EnableAsync
+public class SpringbootApplication { ... }
+
+@RestController
+@RequestMapping(value = "/api/")
+public class UserController {
+    @Autowired UserService userService;
+
+    @GetMapping(path = "/getUser")
+    public String getUser() {
+        System.out.println("inside getUserMethod: " + Thread.currentThread().getName());
+        userService.asyncMethodTest();
+        return "done";
+    }
+}
+
+@Component
+public class UserService {
+    @Async
+    public void asyncMethodTest() {
+        System.out.println("inside asyncMethodTest: " + Thread.currentThread().getName());
+    }
+}</code></pre>
+<pre><code>inside getUserMethod: http-nio-8080-exec-1
+inside asyncMethodTest: task-1
+inside getUserMethod: http-nio-8080-exec-2
+inside asyncMethodTest: task-2</code></pre>
+<p>The controller runs on the Tomcat thread (<code>http-nio-...-exec-N</code>) and the async method on a different thread (<code>task-N</code>).</p>
+
+<h2>Which executor does @Async use?</h2>
+<p>Many places say "Spring Boot uses <code>SimpleAsyncTaskExecutor</code> by default, which creates a new thread each time". That is <b>not fully correct</b>. The framework first looks for a default executor, and only if none is found does it fall back to <code>SimpleAsyncTaskExecutor</code>:</p>
+<pre><code class="java">// AsyncExecutionInterceptor
+protected Executor getDefaultExecutor(BeanFactory beanFactory) {
+    Executor defaultExecutor = super.getDefaultExecutor(beanFactory);
+    return (defaultExecutor != null ? defaultExecutor : new SimpleAsyncTaskExecutor());
+}</code></pre>
+
+<h3>Use case 1: we configure nothing</h3>
+<p>Only <code>@EnableAsync</code> and <code>@Async</code>. During startup Spring Boot sees no executor bean, so it creates its own default <b><code>ThreadPoolTaskExecutor</code></b> (a Spring wrapper around Java's <code>ThreadPoolExecutor</code>) with:</p>
+<table>
+<tr><th>Setting</th><th>Value</th></tr>
+<tr><td>corePoolSize</td><td>8</td></tr>
+<tr><td>maxPoolSize</td><td>2147483647 (Integer.MAX_VALUE)</td></tr>
+<tr><td>keepAliveSeconds</td><td>60</td></tr>
+<tr><td>queueCapacity</td><td>2147483647 (Integer.MAX_VALUE)</td></tr>
+</table>
+<p>That is why the threads were named <code>task-1</code>, <code>task-2</code> ... (the default name prefix).</p>
+<p><b>This is not recommended at all:</b></p>
+<ol>
+<li><b>Under-utilisation of threads.</b> With a fixed core size and an almost unbounded queue, most tasks sit in the queue instead of causing new threads to be created.</li>
+<li><b>High latency.</b> The queue is so large that, under load, tasks wait a long time.</li>
+<li><b>Thread exhaustion.</b> If the queue ever fills, the pool grows up to <code>Integer.MAX_VALUE</code> threads, and the server can go down from the overhead of managing them.</li>
+<li><b>High memory usage.</b> Every thread needs memory.</li>
+</ol>
+
+<h3>Use case 2: our own ThreadPoolTaskExecutor bean (recommended)</h3>
+<pre><code class="java">@Configuration
+public class AppConfig {
+
+    @Bean(name = "myThreadPoolExecutor")
+    public Executor taskExecutor() {
+        int minPoolSize = 2;
+        int maxPoolSize = 4;
+        int queueSize = 3;
+        ThreadPoolTaskExecutor poolTaskExecutor = new ThreadPoolTaskExecutor();
+        poolTaskExecutor.setCorePoolSize(minPoolSize);
+        poolTaskExecutor.setMaxPoolSize(maxPoolSize);
+        poolTaskExecutor.setQueueCapacity(queueSize);
+        poolTaskExecutor.setThreadNamePrefix("MyThread-");
+        poolTaskExecutor.initialize();
+        return poolTaskExecutor;
+    }
+}</code></pre>
+<p>At startup Spring Boot sees a <code>ThreadPoolTaskExecutor</code> bean and <b>makes it the default</b>. Even a bare <code>@Async</code> (no name) now picks <code>myThreadPoolExecutor</code>: threads are named <code>MyThread-1</code>, <code>MyThread-2</code> ...</p>
+<p>Put a sleep in the async method to simulate load and send many requests: first the 2 core threads work, extra tasks wait in the queue (size 3), then threads grow up to the max (4), and any task beyond that is <b>rejected</b> with <code>TaskRejectedException</code> / <code>RejectedExecutionException</code>. This is recommended because it solves every issue of use case 1: bounded size, bounded queue, predictable behaviour.</p>
+
+<h3>Use case 3: our own java.util.concurrent ThreadPoolExecutor bean</h3>
+<pre><code class="java">@Configuration
+public class AppConfig {
+
+    @Bean(name = "myThreadPoolExecutor")
+    public ThreadPoolExecutor poolExecutor() {
+        int minPoolSize = 2, maxPoolSize = 4, queueSize = 3;
+        return new ThreadPoolExecutor(minPoolSize, maxPoolSize, 1, TimeUnit.HOURS,
+                new ArrayBlockingQueue&lt;&gt;(queueSize), new CustomThreadFactory());
+    }
+}
+
+class CustomThreadFactory implements ThreadFactory {
+    private final AtomicInteger threadNo = new AtomicInteger(1);
+    public Thread newThread(Runnable r) { return new Thread(r, "MyThread-" + threadNo.getAndIncrement()); }
+}
+
+@Component
+public class UserService {
+    @Async
+    public void asyncMethodTest() { ... }        // no name given
+}</code></pre>
+<p>Now Spring Boot sees an executor (the plain Java one) and so does <b>not</b> create its own <code>ThreadPoolTaskExecutor</code>; but a bare <code>@Async</code> cannot use a plain <code>ThreadPoolExecutor</code> as the default, so it falls back to <b><code>SimpleAsyncTaskExecutor</code></b>. Output: <code>SimpleAsyncTaskExecutor-1</code>, <code>-2</code> ...</p>
+<p><code>SimpleAsyncTaskExecutor</code> is not recommended: it just <b>creates a new thread every time</b>, which leads to thread exhaustion, thread creation overhead (no reuse) and high memory usage.</p>
+<p>So whenever you define a Java <code>ThreadPoolExecutor</code> bean, <b>always name it in <code>@Async</code></b>:</p>
+<pre><code class="java">@Async("myThreadPoolExecutor")
+public void asyncMethodTest() {
+    System.out.println("inside asyncMethodTest: " + Thread.currentThread().getName());
+}</code></pre>
+<p>This prints <code>MyThread-1</code>, <code>MyThread-2</code> ...</p>
+
+<h3>The clean way: set the default once</h3>
+<p>If you do not want to think about use cases 1, 2 or 3 and want <b>your executor to always be the default</b> for every <code>@Async</code>, implement <code>AsyncConfigurer</code>:</p>
+<pre><code class="java">@Configuration
+public class MyAsyncConfig implements AsyncConfigurer {
+
+    @Override
+    public Executor getAsyncExecutor() {
+        int minPoolSize = 2, maxPoolSize = 4, queueSize = 3;
+        ThreadPoolExecutor poolExecutor = new ThreadPoolExecutor(minPoolSize, maxPoolSize, 1,
+                TimeUnit.HOURS, new ArrayBlockingQueue&lt;&gt;(queueSize), new CustomThreadFactory());
+        return poolExecutor;                      // used by every @Async without a name
+    }
+}</code></pre>
+<p>Now even a plain <code>@Async</code> uses <code>MyThread-N</code>, not <code>SimpleAsyncTaskExecutor</code>.</p>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>The configurable properties in Spring Boot 3: <code>spring.task.execution.pool.core-size</code>, <code>max-size</code>, <code>queue-capacity</code>, <code>thread-name-prefix</code>. You can tune the auto-configured executor without writing a bean.</li>
+<li>A <code>ThreadPoolTaskExecutor</code> only grows past <code>corePoolSize</code> when the <b>queue is full</b>, which is why a huge queue makes <code>maxPoolSize</code> meaningless.</li>
+<li>For fire-and-forget IO work on Java 21 you can also run tasks on <b>virtual threads</b> (<code>spring.threads.virtual.enabled=true</code>).</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What executor does @Async use by default?</summary><p>If there is an executor bean (Spring Boot auto-configures a <code>ThreadPoolTaskExecutor</code> named <code>applicationTaskExecutor</code>, or your own), it is used. Only if none can be resolved does Spring fall back to <code>SimpleAsyncTaskExecutor</code>, which creates a new thread per task.</p></details>
+<details><summary>Why is the default Boot executor risky in production?</summary><p>Unbounded queue and max pool size: tasks pile up in memory and latency explodes. Configure bounded sizes.</p></details>
+<details><summary>What happens when the pool and queue are full?</summary><p>The rejection policy kicks in: the default <code>AbortPolicy</code> throws <code>RejectedExecutionException</code>.</p></details>
+</div>

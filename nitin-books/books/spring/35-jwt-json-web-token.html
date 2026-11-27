@@ -1,0 +1,135 @@
+<h1>JWT (JSON Web Token)</h1>
+<p class="kicker">What a JWT is, why it replaced session ids, its structure (header, payload, signature) and its known challenges.</p>
+
+<h2>What is a JWT</h2>
+<ul>
+<li>It provides a <b>secure way of transmitting information between parties as a JSON object</b>.</li>
+<li>The information can be <b>verified because it is digitally signed</b>, using HMAC (a shared secret) or RSA (a public/private key pair) and so on.</li>
+</ul>
+<p><b>Advantages:</b></p>
+<ul>
+<li><b>Compact:</b> small enough to be sent inside an HTTP header, so transmission is fast.</li>
+<li><b>Self-contained / stateless:</b> the payload holds all the required information about the user, so it avoids querying the database.</li>
+<li>Can be signed with <b>symmetric (HMAC)</b> or <b>asymmetric (RSA)</b> keys.</li>
+<li>A <b>built-in expiry</b> mechanism.</li>
+<li><b>Custom claims</b> (additional data) can be added to the JWT.</li>
+</ul>
+<p><b>Where to use a JWT:</b></p>
+<ul>
+<li><b>Authentication</b>: confirming the user identity.</li>
+<li><b>Authorization</b>: checking the user's permission before giving access to resources.</li>
+<li><b>SSO (Single Sign-On)</b>: authenticate once and access multiple applications.</li>
+</ul>
+
+<h3>The flow</h3>
+<div class="diag">
+<div class="row"><div class="cb sm">1. Client logs in with username and password</div><div class="cb sm">2. Authentication server generates a token and returns it</div></div>
+<div class="row"><div class="cb sm">3. Client requests the resources, sending the token in the <code>Authorization</code> header</div><div class="cb sm">4. Resource server authenticates the user using the token and sends the response</div></div>
+</div>
+<p>The resource server can validate the token on its own (by checking the signature), or may call endpoints of the authentication server to validate various parts of the token.</p>
+
+<h2>What was popular before JWT, and its problems</h2>
+<p><b>Session ID (JSESSIONID):</b></p>
+<ol>
+<li>The client logs in with username and password.</li>
+<li>The authorization server <b>creates a session id and saves it in a DB</b> with the other user information needed for authentication.</li>
+<li>It returns the session id in cookies.</li>
+<li>The client sends requests with the cookie.</li>
+<li>The resource server <b>queries the DB</b> to look up the session id and validates it.</li>
+<li>It sends the response.</li>
+</ol>
+<p><b>Disadvantages:</b></p>
+<ul>
+<li><b>Stateful:</b> it relies on server-side state management, which causes problems in distributed systems.</li>
+<li>It is just a <b>unique random string</b>; when the server gets this id, it has to perform a DB query to fetch the details.</li>
+</ul>
+
+<h2>JWT structure</h2>
+<p>Three parts separated by dots: <code>aaaaaaaaaa.bbbbbbbbbb.cccccccccc</code> = <b>Header . Payload . Signature</b>.</p>
+<pre><code>Header
+{ "typ": "JWT", "alg": "RS256", "kid": "sfdsf234234" }
+
+Payload
+{ "iss": "https://example.com/auth",
+  "sub": "1234567890",
+  "exp": 1711945909,
+  "email": "conceptandcoding@xyz.com",
+  "jti": "unique_id_12312312" }
+
+Signature
+RSASHA256( Base64UrlEncode(Header) + "." + Base64UrlEncode(Payload), Key )</code></pre>
+
+<h3>Header</h3>
+<ul>
+<li>Contains <b>metadata</b> about the token.</li>
+<li><code>typ</code>: type of the token, generally <code>JWT</code> always.</li>
+<li><code>alg</code>: the <b>signing algorithm</b> used, like <code>RS256</code> (RSA) or <code>HS256</code> (HMAC).</li>
+<li><code>kid</code>: key id, to know which key signed it.</li>
+</ul>
+
+<h3>Payload</h3>
+<p>Contains the <b>claims</b>: in simple terms, user information or any additional information. There are three kinds:</p>
+<table>
+<tr><th>Claims</th><th>Meaning</th></tr>
+<tr><td><b>Registered claims</b></td><td>Predefined names and meaning.</td></tr>
+<tr><td><b>Public claims</b></td><td>Custom claims which can be shared and understood by multiple parties.</td></tr>
+<tr><td><b>Private claims</b></td><td>Custom claims intended for internal use only; not standardized, and not expected to be understood by other parties.</td></tr>
+</table>
+<p><b>Registered claims:</b></p>
+<ul>
+<li><code>iss</code> (Issuer): the entity that issued the JWT.</li>
+<li><code>sub</code> (Subject): identifies the user.</li>
+<li><code>aud</code> (Audience): identifies the recipient for which the token is intended.</li>
+<li><code>exp</code> (Expiration time): after this time the token is not valid.</li>
+<li><code>nbf</code> (Not before): before this time the token should not be accepted.</li>
+<li><code>iat</code> (Issued at): the time at which the token was issued.</li>
+<li><code>jti</code> (JWT id): a unique JWT id.</li>
+</ul>
+
+<h3>Signature</h3>
+<ol>
+<li>Encode the JWT header and payload separately using Base64 (URL-safe) encoding.</li>
+<li>Concatenate the encoded header and payload with <code>"."</code>, e.g. <code>xxxxxxxx.yyyyyyyy</code>. This is known as the <b>message</b>.</li>
+<li>Use RSA (asymmetric) or HMAC (symmetric) cryptography to create the <b>digital signature</b> of this message.</li>
+<li>Encode the signature generated in the previous step.</li>
+<li>Concatenate it with <code>"."</code> to get the full token.</li>
+</ol>
+<p>Dummy JWT sample (three Base64 parts): <code>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV</code></p>
+<p>Sample API request:</p>
+<pre><code>curl --location --request GET 'https://exampleHost.com:12345/api/resource' \
+  --header 'Authorization: Bearer &lt;the JWT&gt;'</code></pre>
+
+<h2>Challenges with JWT</h2>
+<ol>
+<li><b>Token invalidation.</b> Say I have blacklisted a user: how do I invalidate their token before it expires? Options:
+<ul>
+<li>The server keeps a list of blacklisted tokens, and a DB/cache lookup is then needed while validating (this brings state back).</li>
+<li>Change the secret key, but this invalidates the JWT for <b>all</b> users.</li>
+<li>Keep tokens <b>very short lived</b>.</li>
+<li>Or tokens should be used only once.</li>
+</ul></li>
+<li><b>A JWT is encoded, not encrypted</b>, so anyone can read the payload; it is less secure for sensitive data. Use <b>JWE</b>, meaning the payload part is encrypted, or simply keep sensitive data out of it.</li>
+<li><b>Unsecured JWT with <code>"alg": "none"</code>:</b> such a JWT should be <b>rejected</b>.</li>
+<li><b>JWK exploit:</b> a public key embedded in the token itself (the <code>jwk</code> header) should <b>not</b> be used to verify the signature, otherwise an attacker can sign with their own key and ship their own public key inside the token. Here <code>e</code> stands for "exponent" and <code>n</code> for "modulus", and together they form the public key:</li>
+</ol>
+<pre><code>{ "typ": "JWT", "alg": "RS256",
+  "jwk": { "n": "sfsdf234324324fsd4sfdsfsdf23", "e": "ABC4ED", "kid": "sdfds3432432432fwfdwfsfwf" } }</code></pre>
+<ol start="5">
+<li>Instead, use the <b><code>kid</code></b> in the header to look up the public key at <code>https://{Auth server domain}/.well-known/jwks.json</code> (a trusted list of keys published by the authentication server).</li>
+</ol>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Always verify the signature <b>and</b> <code>exp</code>, <code>iss</code>, <code>aud</code>, and pin the expected algorithm on the server.</li>
+<li>Common design: a short-lived <b>access token</b> (minutes) plus a longer-lived <b>refresh token</b> that can be revoked server-side.</li>
+<li>HS256 shares one secret between signer and verifier (simple, fine for one service); RS256 lets many services verify with the public key while only the auth server holds the private key.</li>
+<li>Do not store JWTs in <code>localStorage</code> if XSS is a risk; an HttpOnly cookie is safer (then think about CSRF).</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What are the three parts of a JWT?</summary><p>Header (alg, typ), payload (claims) and signature over header.payload.</p></details>
+<details><summary>Is a JWT encrypted?</summary><p>No: Base64url-encoded and signed. Anyone can read it; signing only guarantees it was not altered. JWE encrypts it.</p></details>
+<details><summary>How do you log a user out or revoke a JWT?</summary><p>Short expiry plus refresh tokens, a deny-list of <code>jti</code> values in a cache, or rotating signing keys.</p></details>
+<details><summary>JWT vs session id?</summary><p>Session id is an opaque pointer needing server-side lookup (stateful). JWT carries verified data itself (stateless) but is harder to revoke.</p></details>
+<details><summary>HS256 vs RS256?</summary><p>HS256: one shared secret. RS256: private key signs, public key verifies, better for distributed verification.</p></details>
+</div>

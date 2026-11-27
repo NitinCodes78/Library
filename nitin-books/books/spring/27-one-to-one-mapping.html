@@ -1,0 +1,195 @@
+<h1>JPA: OneToOne Mapping (Part 6)</h1>
+<p class="kicker">Unidirectional and bidirectional @OneToOne, @JoinColumn, cascade types, eager vs lazy loading and the serialization trap.</p>
+
+<h2>@OneToOne unidirectional</h2>
+<ul>
+<li>One entity (A) references <b>only one instance</b> of another entity (B).</li>
+<li>The reference exists in <b>one direction only</b>: from parent (A) to child (B).</li>
+</ul>
+<pre><code class="java">@Table(name = "user_details")
+@Entity
+public class UserDetails {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    private String email;
+
+    @OneToOne
+    private UserAddress userAddress;
+}
+
+@Table(name = "user_address")
+@Entity
+public class UserAddress {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String street;
+    private String city;
+    private String state;
+    private String zipCode;
+    public UserAddress() { }
+}</code></pre>
+<p>In <code>USER_DETAILS</code> a column <code>user_address_id</code> appears: it is a <b>foreign key</b> to <code>USER_ADDRESS</code>. By default Hibernate:</p>
+<ul>
+<li>names the FK as <code>&lt;field_name&gt;_id</code> (so the field <code>userAddress</code> gives <code>user_address_id</code>);</li>
+<li>points it to the <b>primary key</b> of the other table.</li>
+</ul>
+
+<h3>@JoinColumn for more control</h3>
+<pre><code class="java">@OneToOne
+@JoinColumn(name = "user_address_fk", referencedColumnName = "id")
+private UserAddress userAddress;</code></pre>
+<p><code>name</code> is the FK column in this table; <code>referencedColumnName</code> is the column it points to in the other table.</p>
+
+<h3>What if the child has a composite key?</h3>
+<p>Use <code>@JoinColumns</code> and map <b>all</b> the columns:</p>
+<pre><code class="java">@Embeddable
+public class UserAddressCK implements Serializable {
+    private String street;
+    private String city;
+    // equals() and hashCode()
+}
+
+@Entity
+public class UserAddress {
+    @EmbeddedId
+    private UserAddressCK userAddressCK;
+    private String state;
+    private String zipCode;
+}
+
+@Entity
+public class UserDetails {
+    ...
+    @OneToOne
+    @JoinColumns({
+        @JoinColumn(name = "address_street", referencedColumnName = "street"),
+        @JoinColumn(name = "address_city",   referencedColumnName = "city")
+    })
+    private UserAddress userAddress;
+}</code></pre>
+
+<h2>CascadeType</h2>
+<p>Values: <code>ALL, PERSIST, MERGE, REMOVE, REFRESH, DETACH</code>.</p>
+<ul>
+<li><b>Without a cascade type</b>, any operation on the parent does <b>not</b> affect the child entity.</li>
+<li>Managing child entities explicitly is error-prone.</li>
+</ul>
+
+<h3>CascadeType.PERSIST</h3>
+<p>Persisting (inserting) the User entity automatically persists its associated <code>UserAddress</code>.</p>
+<pre><code class="java">@OneToOne(cascade = CascadeType.PERSIST)
+private UserAddress userAddress;</code></pre>
+<p>Now one POST with the user and nested address inserts <b>both</b> rows.</p>
+
+<h3>CascadeType.MERGE</h3>
+<p>Updating the User entity automatically updates its associated <code>UserAddress</code>.</p>
+<p>Let us first see what happens with <b>only PERSIST</b>:</p>
+<pre><code class="java">@Service
+public class UserDetailsService {
+    @Autowired UserDetailsRepository userDetailsRepository;
+
+    public UserDetails saveUser(UserDetails user) { return userDetailsRepository.save(user); }
+
+    public UserDetails updateUser(Long id, UserDetails user) {
+        Optional&lt;UserDetails&gt; existingUser = userDetailsRepository.findById(id);
+        if (existingUser.isPresent()) {
+            return userDetailsRepository.save(user);
+        }
+        ...
+    }
+}</code></pre>
+<p>We use the same <code>save</code> method to update. Internally it checks whether the entity is new by looking at the <b>id field</b>; since we pass the id in the request body, it updates instead of inserting.</p>
+<ol>
+<li><b>1st: INSERT</b>: both tables get rows.</li>
+<li><b>2nd: UPDATE</b> with changes in both <code>UserDetails</code> and <code>UserAddress</code>: <b>only the UserDetails changes are reflected</b>; the address row is unchanged.</li>
+</ol>
+<p>If we want both insert and update to carry over, we need both <b>PERSIST + MERGE</b>:</p>
+<pre><code class="java">@OneToOne(cascade = {CascadeType.PERSIST, CascadeType.MERGE})
+private UserAddress userAddress;</code></pre>
+<p>Then insert works as before, and the update changes both tables.</p>
+
+<h3>CascadeType.REMOVE</h3>
+<p>Deleting the User entity automatically deletes its associated <code>UserAddress</code>. (1st INSERT as before, 2nd DELETE removes the rows from both tables.)</p>
+
+<h3>CascadeType.REFRESH</h3>
+<ul>
+<li>Less frequently used. JPA has access to the <code>EntityManager</code>, which maintains the persistence context and thus the <b>first-level cache</b>.</li>
+<li>Sometimes we want to <b>bypass</b> the first-level cache, so the EntityManager has a <code>refresh</code> method: it reads that entity <b>directly from the DB</b> instead of the cache.</li>
+<li>With <code>CascadeType.REFRESH</code> we tell JPA to read the parent <b>and its associated child entities</b> from the DB. Whenever <code>refresh()</code> is invoked on <code>UserDetails</code>, it is also invoked on <code>UserAddress</code>.</li>
+</ul>
+
+<h3>CascadeType.DETACH</h3>
+<ul>
+<li>Like persist, remove and refresh, the EntityManager also has <code>detach</code>: its purpose is to <b>remove the given entity from the persistence context</b>, so JPA no longer manages its lifecycle.</li>
+<li>With <code>CascadeType.DETACH</code>, detaching the parent also detaches the associated child.</li>
+</ul>
+
+<h3>CascadeType.ALL</h3>
+<p>All the capabilities together: PERSIST, MERGE, REMOVE, REFRESH and DETACH.</p>
+<pre><code class="java">@OneToOne(cascade = CascadeType.ALL)
+private UserAddress userAddress;</code></pre>
+
+<h2>What about GET? Eager vs lazy loading</h2>
+<p>Do child entities always load with the parent?</p>
+<div class="cols2">
+<div class="card"><h4>Eager loading</h4>
+<ul><li>The associated entity is loaded <b>immediately</b> along with the parent.</li>
+<li><b>Default for @OneToOne and @ManyToOne.</b> JPA assumes that since there is only one child, it will probably be needed when the parent is accessed.</li></ul></div>
+<div class="card"><h4>Lazy loading</h4>
+<ul><li>The associated entity is <b>not</b> loaded until accessed, for example when we call <code>userDetails.getUserAddress()</code>.</li>
+<li><b>Default for @OneToMany and @ManyToMany.</b> There can be many child rows, so returning them all could hurt performance.</li></ul></div>
+</div>
+<p>We can control the default:</p>
+<pre><code class="java">@OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+private UserAddress userAddress;</code></pre>
+
+<h3>The serialization trap</h3>
+<p>Testing this code: the <b>insert</b> succeeds, but the <b>GET fails</b> with <code>InvalidDefinitionException: No serializer found for class org.hibernate.proxy.pojo.bytebuddy.ByteBuddyInterceptor</code>.</p>
+<ul>
+<li>With lazy loading, <code>userAddress</code> is only a <b>Hibernate proxy</b> when the response JSON is created. Jackson does not know how to serialize it and fails while constructing the response.</li>
+<li>Why did <b>INSERT</b> not fail? Because on insert the data goes to the DB and also sits in the persistence context (first-level cache), so the real <code>UserAddress</code> object is already in memory and the response needs no DB call.</li>
+</ul>
+<p>Two ways to fix the GET:</p>
+<table>
+<tr><th>Option</th><th>Notes</th></tr>
+<tr><td><code>@JsonIgnore</code> on the field</td><td>Removes <code>UserAddress</code> from the response.</td></tr>
+<tr><td><b>DTO</b> (Data Transfer Object)</td><td>Much cleaner and <b>recommended</b>: map the entity to a response class containing only what you want to expose.</td></tr>
+</table>
+
+<h2>Bidirectional @OneToOne</h2>
+<p>Here <b>both</b> sides know each other: <code>UserDetails</code> has <code>userAddress</code> and <code>UserAddress</code> has <code>userDetails</code>. Only <b>one side owns the foreign key</b>; the other side uses <code>mappedBy</code>.</p>
+<pre><code class="java">@Entity
+public class UserDetails {
+    ...
+    @OneToOne(cascade = CascadeType.ALL)
+    @JoinColumn(name = "user_address_id")       // owning side: holds the FK column
+    private UserAddress userAddress;
+}
+
+@Entity
+public class UserAddress {
+    ...
+    @OneToOne(mappedBy = "userAddress")         // inverse side: no column, points to the field name in UserDetails
+    private UserDetails userDetails;
+}</code></pre>
+<ul>
+<li>Set both sides in code (<code>user.setUserAddress(a); a.setUserDetails(user);</code>), otherwise the inverse side stays null.</li>
+<li>When serializing to JSON, the two references point at each other and cause <b>infinite recursion</b>: break the loop with <code>@JsonIgnore</code> / <code>@JsonManagedReference</code> + <code>@JsonBackReference</code>, or better, return a DTO.</li>
+</ul>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Cascade is about <b>operations flowing parent to child</b>; it is separate from fetch type.</li>
+<li><code>orphanRemoval = true</code> additionally deletes a child that is detached from its parent (set the field to null).</li>
+<li>Never expose entities from the controller if you can avoid it: DTOs avoid lazy-proxy and recursion problems and keep your API independent of the schema.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What is the owning side of a relationship?</summary><p>The side with the foreign key column (<code>@JoinColumn</code>). The other side uses <code>mappedBy</code> and does not change the FK.</p></details>
+<details><summary>Default fetch types?</summary><p>EAGER for @OneToOne and @ManyToOne; LAZY for @OneToMany and @ManyToMany.</p></details>
+<details><summary>Why did GET fail with "No serializer found ... ByteBuddyInterceptor"?</summary><p>The lazy association was an uninitialised proxy at serialization time. Use a DTO or ignore the field.</p></details>
+<details><summary>Cascade PERSIST vs MERGE?</summary><p>PERSIST propagates insert of a new parent to the child; MERGE propagates an update of an existing (detached) parent. For both, use both (or ALL).</p></details>
+</div>

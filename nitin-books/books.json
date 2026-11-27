@@ -1,0 +1,384 @@
+{
+ "title": "Nitin's Library",
+ "tagline": "Books written from my own notes.",
+ "books": [
+  {
+   "id": "java",
+   "title": "Java",
+   "author": "Nitin",
+   "color": "#1f4e8c",
+   "cover": "java",
+   "chapters": [
+    {
+     "id": "oop",
+     "title": "OOP: Thinking in Objects",
+     "file": "01-oop.html"
+    },
+    {
+     "id": "java-platform",
+     "title": "The Java Platform: JVM, JRE, JDK",
+     "file": "02-java-platform.html"
+    },
+    {
+     "id": "variables-datatypes",
+     "title": "Variables and Data Types",
+     "file": "03-variables-datatypes.html"
+    },
+    {
+     "id": "string",
+     "title": "String and the String Pool",
+     "file": "04-string.html"
+    },
+    {
+     "id": "wrappers-access",
+     "title": "Wrapper Classes, final and Access Modifiers",
+     "file": "05-wrappers-access.html"
+    },
+    {
+     "id": "methods",
+     "title": "Methods: static, final, abstract, varargs",
+     "file": "06-methods.html"
+    },
+    {
+     "id": "constructors",
+     "title": "Constructors",
+     "file": "07-constructors.html"
+    },
+    {
+     "id": "memory-gc",
+     "title": "Memory Management and Garbage Collection",
+     "file": "08-memory-gc.html"
+    },
+    {
+     "id": "object-nested",
+     "title": "The Object Class and Nested Classes",
+     "file": "09-object-nested.html"
+    },
+    {
+     "id": "generics",
+     "title": "Generics",
+     "file": "10-generics.html"
+    },
+    {
+     "id": "pojo-enum",
+     "title": "POJO, Enum and Final Classes",
+     "file": "11-pojo-enum.html"
+    },
+    {
+     "id": "singleton-immutable",
+     "title": "Singleton and Immutable Classes",
+     "file": "12-singleton-immutable.html"
+    },
+    {
+     "id": "interfaces",
+     "title": "Interfaces",
+     "file": "13-interfaces.html"
+    },
+    {
+     "id": "functional-lambda",
+     "title": "Functional Interfaces and Lambdas",
+     "file": "14-functional-lambda.html"
+    },
+    {
+     "id": "reflection",
+     "title": "Reflection",
+     "file": "15-reflection.html"
+    },
+    {
+     "id": "annotations",
+     "title": "Annotations",
+     "file": "16-annotations.html"
+    },
+    {
+     "id": "exceptions",
+     "title": "Exception Handling",
+     "file": "17-exceptions.html"
+    },
+    {
+     "id": "operators-switch",
+     "title": "Operators and Switch",
+     "file": "18-operators-switch.html"
+    },
+    {
+     "id": "collections-queue",
+     "title": "Collections Framework: Overview, Queue and Deque",
+     "file": "19-collections-queue.html"
+    },
+    {
+     "id": "comparable-comparator",
+     "title": "Comparable vs Comparator",
+     "file": "20-comparable-comparator.html"
+    },
+    {
+     "id": "list",
+     "title": "List: ArrayList, LinkedList, Vector, Stack",
+     "file": "21-list.html"
+    },
+    {
+     "id": "map-hashmap",
+     "title": "Map and HashMap Internals",
+     "file": "22-map-hashmap.html"
+    },
+    {
+     "id": "linkedhashmap-treemap-sets",
+     "title": "LinkedHashMap, TreeMap and Sets",
+     "file": "23-linkedhashmap-treemap-sets.html"
+    },
+    {
+     "id": "streams",
+     "title": "Streams (Java 8)",
+     "file": "24-streams.html"
+    },
+    {
+     "id": "threads-basics",
+     "title": "Threads: Creation, Lifecycle and Synchronization",
+     "file": "25-threads-basics.html"
+    },
+    {
+     "id": "locks-atomics",
+     "title": "Locks, Atomic Variables and volatile",
+     "file": "26-locks-atomics.html"
+    },
+    {
+     "id": "thread-pool",
+     "title": "Thread Pool and ThreadPoolExecutor",
+     "file": "27-thread-pool.html"
+    },
+    {
+     "id": "future-completablefuture",
+     "title": "Future, Callable and CompletableFuture",
+     "file": "28-future-completablefuture.html"
+    },
+    {
+     "id": "executors-forkjoin",
+     "title": "Executors, Fork-Join and Shutdown",
+     "file": "29-executors-forkjoin.html"
+    },
+    {
+     "id": "threadlocal-virtual",
+     "title": "ThreadLocal and Virtual Threads",
+     "file": "30-threadlocal-virtual.html"
+    },
+    {
+     "id": "lombok",
+     "title": "Project Lombok",
+     "file": "31-lombok.html"
+    },
+    {
+     "id": "sequenced-collections",
+     "title": "SequencedCollection, SequencedSet and SequencedMap",
+     "file": "32-sequenced-collections.html"
+    },
+    {
+     "id": "modern-java",
+     "title": "Modern Java: Sealed, Switch, Pattern Matching, Records, Text Blocks",
+     "file": "33-modern-java.html"
+    },
+    {
+     "id": "optional",
+     "title": "Optional (Java 8 to 11)",
+     "file": "34-optional.html"
+    }
+   ]
+  },
+  {
+   "id": "spring",
+   "title": "Spring Boot",
+   "author": "Nitin",
+   "color": "#2f7d32",
+   "cover": "spring",
+   "chapters": [
+    {
+     "id": "introduction",
+     "title": "Introduction",
+     "file": "01-introduction.html"
+    },
+    {
+     "id": "project-setup",
+     "title": "Project Setup",
+     "file": "02-project-setup.html"
+    },
+    {
+     "id": "maven",
+     "title": "Maven",
+     "file": "03-maven.html"
+    },
+    {
+     "id": "annotations-controller-layer",
+     "title": "Annotations: Controller Layer",
+     "file": "04-annotations-controller-layer.html"
+    },
+    {
+     "id": "bean-and-its-lifecycle",
+     "title": "Bean and its Lifecycle",
+     "file": "05-bean-lifecycle.html"
+    },
+    {
+     "id": "dependency-injection",
+     "title": "Dependency Injection",
+     "file": "06-dependency-injection.html"
+    },
+    {
+     "id": "bean-scopes",
+     "title": "Bean Scopes",
+     "file": "07-bean-scopes.html"
+    },
+    {
+     "id": "dynamic-bean-initialization",
+     "title": "Dynamic Bean Initialization",
+     "file": "08-dynamic-bean-initialization.html"
+    },
+    {
+     "id": "conditionalonproperty",
+     "title": "@ConditionalOnProperty",
+     "file": "09-conditionalonproperty.html"
+    },
+    {
+     "id": "profile",
+     "title": "@Profile",
+     "file": "10-profile.html"
+    },
+    {
+     "id": "aop",
+     "title": "AOP",
+     "file": "11-aop.html"
+    },
+    {
+     "id": "transactional-part-1",
+     "title": "@Transactional (Part 1)",
+     "file": "12-transactional-part-1.html"
+    },
+    {
+     "id": "transactional-part-2",
+     "title": "@Transactional (Part 2)",
+     "file": "13-transactional-part-2.html"
+    },
+    {
+     "id": "transactional-isolation-levels",
+     "title": "@Transactional: Isolation Levels",
+     "file": "14-transactional-isolation-levels.html"
+    },
+    {
+     "id": "async-part-1",
+     "title": "@Async (Part 1)",
+     "file": "15-async-part-1.html"
+    },
+    {
+     "id": "async-part-2",
+     "title": "@Async (Part 2)",
+     "file": "16-async-part-2.html"
+    },
+    {
+     "id": "custom-interceptors",
+     "title": "Custom Interceptors",
+     "file": "17-custom-interceptors.html"
+    },
+    {
+     "id": "filters-vs-interceptors",
+     "title": "Filters vs Interceptors",
+     "file": "18-filters-vs-interceptors.html"
+    },
+    {
+     "id": "hateoas",
+     "title": "HATEOAS",
+     "file": "19-hateoas.html"
+    },
+    {
+     "id": "responseentity-and-status-codes",
+     "title": "ResponseEntity and Status Codes",
+     "file": "20-responseentity-and-status-codes.html"
+    },
+    {
+     "id": "exception-handling",
+     "title": "Exception Handling",
+     "file": "21-exception-handling.html"
+    },
+    {
+     "id": "jpa-part-1",
+     "title": "JPA (Part 1)",
+     "file": "22-jpa-part-1.html"
+    },
+    {
+     "id": "jpa-architecture",
+     "title": "JPA Architecture",
+     "file": "23-jpa-architecture.html"
+    },
+    {
+     "id": "first-level-caching",
+     "title": "First-Level Caching",
+     "file": "24-first-level-caching.html"
+    },
+    {
+     "id": "second-level-caching",
+     "title": "Second-Level Caching",
+     "file": "25-second-level-caching.html"
+    },
+    {
+     "id": "jpa-dto-to-table",
+     "title": "JPA: DTO to Table",
+     "file": "26-jpa-dto-to-table.html"
+    },
+    {
+     "id": "one-to-one-mapping",
+     "title": "One-to-One Mapping",
+     "file": "27-one-to-one-mapping.html"
+    },
+    {
+     "id": "jpa-part-7",
+     "title": "JPA (Part 7)",
+     "file": "28-jpa-part-7.html"
+    },
+    {
+     "id": "jpa-part-8",
+     "title": "JPA (Part 8)",
+     "file": "29-jpa-part-8.html"
+    },
+    {
+     "id": "jpa-parts-9-and-10",
+     "title": "JPA (Parts 9 and 10)",
+     "file": "30-jpa-parts-9-and-10.html"
+    },
+    {
+     "id": "security-attacks-and-demo",
+     "title": "Security Attacks and Demo",
+     "file": "31-security-attacks-and-demo.html"
+    },
+    {
+     "id": "spring-security-part-1",
+     "title": "Spring Security (Part 1)",
+     "file": "32-spring-security-part-1.html"
+    },
+    {
+     "id": "spring-security-parts-2-and-3",
+     "title": "Spring Security (Parts 2 and 3)",
+     "file": "33-spring-security-parts-2-and-3.html"
+    },
+    {
+     "id": "basic-authentication",
+     "title": "Basic Authentication",
+     "file": "34-basic-authentication.html"
+    },
+    {
+     "id": "jwt-json-web-token",
+     "title": "JWT (JSON Web Token)",
+     "file": "35-jwt-json-web-token.html"
+    },
+    {
+     "id": "jwt-with-spring-security",
+     "title": "JWT with Spring Security",
+     "file": "36-jwt-with-spring-security.html"
+    },
+    {
+     "id": "oauth2-with-spring-security",
+     "title": "OAuth2 with Spring Security",
+     "file": "37-oauth2-with-spring-security.html"
+    },
+    {
+     "id": "role-based-authorization",
+     "title": "Role-Based Authorization",
+     "file": "38-role-based-authorization.html"
+    }
+   ]
+  }
+ ]
+}

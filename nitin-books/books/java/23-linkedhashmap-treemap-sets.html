@@ -1,0 +1,122 @@
+<h1>LinkedHashMap, TreeMap and Sets</h1>
+<p class="kicker">Ordered maps, sorted maps, and sets that quietly use a Map inside.</p>
+
+<h2>LinkedHashMap</h2>
+<p><code>extends HashMap&lt;K,V&gt; implements Map&lt;K,V&gt;</code></p>
+<ol>
+<li>Helps to maintain <b>insertion order</b> or <b>access order</b>.</li>
+<li>Similar to HashMap, but also uses a <b>doubly linked list</b>.</li>
+</ol>
+<p>Suppose <code>map.put(1,"A"); put(21,"B"); put(23,"C"); put(141,"D"); put(25,"E");</code></p>
+<div class="diag">
+<div class="row"><div class="cb">bucket 0<br><small>1 "A" &rarr; 21 "B"</small></div><div class="cb">bucket 1<br><small>23 "C" &rarr; 25 "E"</small></div><div class="cb">bucket 2<br><small>141 "D"</small></div></div>
+<p style="text-align:center"><small>Buckets work exactly as in HashMap (the <code>next</code> pointers), and every node also has <b>before</b> and <b>after</b> pointers that string all entries together in insertion order: A &harr; B &harr; C &harr; D &harr; E.</small></p></div>
+<p>In LinkedHashMap, <code>Map.Entry&lt;K,V&gt;</code> extends <code>HashMap.Node&lt;K,V&gt;</code> and it contains <b>before</b> and <b>after</b> extra, in addition. It's also an array of Nodes, calculates the hash and then index and stores elements accordingly, but also maintains before and after pointers, in addition to HashMap, to maintain the insertion order.</p>
+
+<h3>Access order</h3>
+<p>By default it gives <b>insertionOrder = true</b> and <b>accessOrder = false</b>. With <code>accessOrder = true</code>:</p>
+<pre><code class="java">Map&lt;Integer, String&gt; map = new LinkedHashMap&lt;&gt;(16, .75F, true);
+//                                          initial capacity ^   ^ load factor  ^ accessOrder
+map.get(21);      // O(1), and moves that node to the last</code></pre>
+<div class="flow"><b>1</b><b>21</b><b>23</b><i>get(21)</i><b>1</b><b>23</b><b>21</b></div>
+<div class="box extra"><strong>Good to know: an LRU cache in a few lines</strong>
+<pre><code class="java">class LRU&lt;K,V&gt; extends LinkedHashMap&lt;K,V&gt; {
+    private final int max;
+    LRU(int max) { super(16, 0.75f, true); this.max = max; }
+    @Override
+    protected boolean removeEldestEntry(Map.Entry&lt;K,V&gt; eldest) {
+        return size() &gt; max;      // drop the least recently used
+    }
+}</code></pre>
+<p>A classic interview question: access order moves used entries to the end, so the eldest is the least recently used.</p></div>
+<h4>Time complexity (amortized)</h4>
+<p><b>O(1)</b> for <code>get()</code>, <code>put()</code>, <code>remove()</code>, <code>containsKey()</code>.</p>
+<p>It's <b>not thread-safe</b> and there is no thread-safe version available. So we have to explicitly make this collection thread-safe like this:</p>
+<pre><code class="java">Map&lt;Integer, String&gt; map2 = Collections.synchronizedMap(new LinkedHashMap&lt;&gt;());</code></pre>
+
+<h2>TreeMap</h2>
+<div class="tree2"><div class="top">Map <small>(interface)</small></div><div class="kids"><div>SortedMap<small> extends Map (interface)</small><div class="kids sm"><div>NavigableMap<small> extends SortedMap (interface)</small><div class="kids sm"><div><b>TreeMap</b><small> implements it (class)</small></div></div></div></div></div></div></div>
+<ul>
+<li>Sorted according to the <b>natural ordering of the key</b>, or by a <b>Comparator</b> provided during map creation.</li>
+<li>Based on a <b>red-black tree</b> (a self-balancing BST).</li>
+<li><b>O(log n)</b> time complexity for insert, remove and get operations.</li>
+</ul>
+<p><b>Node structure:</b> <code>[ Left | Parent | Key | Value | Right ]</code></p>
+
+<h3>SortedMap methods</h3>
+<pre><code class="java">SortedMap&lt;K,V&gt; headMap(K toKey);      // keys strictly less than toKey (exclusive)
+SortedMap&lt;K,V&gt; tailMap(K fromKey);    // keys from fromKey onwards (inclusive)
+K firstKey();
+K lastKey();
+
+SortedMap&lt;Integer, String&gt; map2 = new TreeMap&lt;&gt;(
+        Map.of(21, "SJ", 11, "PJ", 13, "RJ", 5, "TJ")      // Map.of supports up to 10 entries
+);
+// sorted keys: 5, 11, 13, 21
+System.out.println(map2.headMap(13));    // {5=TJ, 11=PJ}      13 exclusive
+System.out.println(map2.tailMap(13));    // {13=RJ, 21=SJ}     13 inclusive
+System.out.println(map2.firstKey());     // 5
+System.out.println(map2.lastKey());      // 21</code></pre>
+<p>Also check certain methods in <code>NavigableMap</code> once: <code>lowerEntry(K key)</code>, <code>lowerKey(K key)</code>, <code>floorKey(K key)</code>, <code>navigableKeySet()</code>, <code>pollFirstEntry()</code>, <code>pollLastEntry()</code> and many more.</p>
+<div class="box extra"><strong>Good to know</strong>
+<p>TreeMap does not allow a <b>null key</b> (it must compare keys), and it compares keys with <code>compareTo</code>/the comparator, <b>not</b> <code>equals()</code>. Handy: <code>floorKey(x)</code> = greatest key &le; x, <code>ceilingKey(x)</code> = smallest key &ge; x.</p></div>
+
+<h2>Set (internally uses a Map)</h2>
+<p>A Set does <b>not contain duplicate values</b> (only one <code>null</code> value you can insert, in HashSet).</p>
+
+<h3>HashSet</h3>
+<ul>
+<li>Data structure used: <b>HashMap</b>: <code>HashMap&lt;E, Object&gt; map = new HashMap&lt;&gt;();</code></li>
+<li>During the <code>add</code> method, it stores the element in the <b>key</b> part, and in its <b>value</b> it stores a <b>dummy object</b>: <code>map.put(element, PRESENT)</code>, where <code>PRESENT</code> is a single shared constant (<code>private static final Object PRESENT</code>), so no extra object is created per element.</li>
+<li>It's not thread-safe. The <code>newKeySet</code> method present in the <code>ConcurrentHashMap</code> class is used to create a thread-safe set.</li>
+</ul>
+
+<table>
+<tr><th>Methods</th><th>Notes</th></tr>
+<tr><td><code>size()</code>, <code>isEmpty()</code></td><td></td></tr>
+<tr><td><code>contains()</code></td><td>O(1)</td></tr>
+<tr><td><code>toArray()</code></td><td></td></tr>
+<tr><td><code>add(E element)</code></td><td>O(1)</td></tr>
+<tr><td><code>remove(E element)</code></td><td>O(1)</td></tr>
+<tr><td><code>addAll(Collection c)</code></td><td>union</td></tr>
+<tr><td><code>removeAll(Collection c)</code></td><td>difference</td></tr>
+<tr><td><code>retainAll(Collection c)</code></td><td><b>intersection</b> of 2 sets</td></tr>
+<tr><td><code>clear()</code>, <code>equals()</code>, <code>stream()</code> &amp; <code>parallelStream()</code>, <code>iterator()</code></td><td></td></tr>
+</table>
+<h4>Thread-safe version</h4>
+<pre><code class="java">Set&lt;Integer&gt; threadSafeSet = ConcurrentHashMap.newKeySet();</code></pre>
+<p>Without thread-safety, adding an element <b>while iterating</b>:</p>
+<pre><code class="java">Iterator&lt;Integer&gt; it = set.iterator();
+while (it.hasNext()) {
+    int val = it.next();
+    if (val == 1) set.add(11);     // ✗ gives ConcurrentModificationException
+}                                  // while iterating we can only remove (it.remove()), not add</code></pre>
+
+<h3>LinkedHashSet</h3>
+<ul>
+<li>Internally it uses <b>LinkedHashMap</b>. <b>O(1)</b>.</li>
+<li>Maintains the <b>insertion order</b> of the elements.</li>
+<li>Not thread-safe, but can be made so: <code>Set&lt;Integer&gt; set = Collections.synchronizedSet(new LinkedHashSet&lt;&gt;());</code></li>
+<li>Can't maintain <b>access order</b> here like LinkedHashMap, as there is no option to pass that variable in the parameter.</li>
+</ul>
+
+
+<h3>TreeSet</h3>
+<ul>
+<li>Internally it uses <b>TreeMap</b>. <b>O(log n)</b>.</li>
+<li>It <b>cannot store a null</b> value.</li>
+<li>Elements stay sorted (natural order or a Comparator).</li>
+</ul>
+<table>
+<tr><th>Set</th><th>Backed by</th><th>Order</th><th>add / contains</th></tr>
+<tr><td>HashSet</td><td>HashMap</td><td>none</td><td>O(1)</td></tr>
+<tr><td>LinkedHashSet</td><td>LinkedHashMap</td><td>insertion</td><td>O(1)</td></tr>
+<tr><td>TreeSet</td><td>TreeMap</td><td>sorted</td><td>O(log n)</td></tr>
+</table>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>How does HashSet reject duplicates?</summary><p>It stores each element as a HashMap key. <code>put</code> of an existing key (same hash, <code>equals()</code> true) doesn't add a new entry, so <code>add()</code> returns false.</p></details>
+<details><summary>How do you implement an LRU cache?</summary><p>A <code>LinkedHashMap</code> with accessOrder = true and an overridden <code>removeEldestEntry</code>.</p></details>
+<details><summary>HashMap vs TreeMap?</summary><p>HashMap: O(1), unordered, allows one null key. TreeMap: O(log n), sorted by key, no null key, and has range methods like headMap/tailMap.</p></details>
+<details><summary>Two sets: how do you get union, intersection, difference?</summary><p><code>addAll</code>, <code>retainAll</code>, <code>removeAll</code> (on a copy).</p></details>
+</div>

@@ -1,0 +1,57 @@
+<h1>Spring Boot Security: Part 1 (Architecture)</h1>
+<p class="kicker">Why we need Spring Security, where its filter chain sits, and the dependencies to add.</p>
+
+<h2>Why Spring Security?</h2>
+<p>There are various kinds of attacks (CSRF, CORS misuse, SQL injection, XSS) and we need to protect our resources from them. For that we need proper:</p>
+<ul>
+<li><b>Authentication:</b> verify <b>who you are</b>.</li>
+<li><b>Authorization:</b> check <b>what you are allowed to do</b>.</li>
+</ul>
+<p>That is where Spring Boot Security comes into the picture.</p>
+
+<h2>Architecture</h2>
+<p>We have already seen what filters are and where they fit: the request passes the servlet container (Tomcat), the <b>filter chain</b>, then the <code>DispatcherServlet</code>, then interceptors, and finally the controller. Spring Security plugs into this by adding a <b>Security Filter Chain</b> among the servlet filters.</p>
+<div class="flow"><b>Request</b><i>Tomcat</i><b>Filters chain (incl. Security Filter Chain)</b><i>DispatcherServlet</i><b>Interceptors</b><i>controller</i><b>Controller</b></div>
+
+<h3>Inside the security filter chain (authentication)</h3>
+<div class="diag">
+<div class="row"><div class="cb wide">UsernamePasswordAuthenticationFilter (one of the security filters)</div></div>
+<div class="row"><div class="cb wide">1. Creates an <code>Authentication</code> object (username, password) and delegates to the <b>AuthenticationManager</b></div></div>
+<div class="row"><div class="cb wide">2. AuthenticationManager (ProviderManager) delegates to an <b>AuthenticationProvider</b> &mdash; default: <code>DaoAuthenticationProvider</code></div></div>
+<div class="row"><div class="cb sm">3. Loads the user through <b>UserDetailsService</b><br><small>InMemoryUserDetailsManager or JdbcUserDetailsManager (username/password in DB)</small></div><div class="cb sm">4. Matches passwords with <b>PasswordEncoder</b><br><small>incoming raw password is hashed and compared with the stored hash</small></div></div>
+<div class="row"><div class="cb wide">5. On success the authenticated <code>Authentication</code> (username, roles) is stored in the <b>SecurityContext</b></div></div>
+</div>
+<ul>
+<li><b>AuthenticationManager</b> is the entry point; it just coordinates.</li>
+<li><b>AuthenticationProvider</b> holds the real logic for one authentication type. The default implementation validates a username/password.</li>
+<li><b>UserDetailsService</b> knows how to fetch a user (from memory, a DB, anywhere).</li>
+<li><b>PasswordEncoder</b>: passwords are hashed during registration, and during login the incoming raw password is hashed the same way and compared.</li>
+<li><b>SecurityContext</b> keeps the current user's authentication (for form login it is saved in the HTTP session through <code>HttpSessionSecurityContextRepository</code>).</li>
+</ul>
+
+<h2>Dependencies</h2>
+<p>If a Spring Boot project is already present, add:</p>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-security&lt;/artifactId&gt;     provides core features: authentication, authorization, security filters etc.
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.session&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-session-jdbc&lt;/artifactId&gt;               enables persistent session management using a relational DB
+&lt;/dependency&gt;</code></pre>
+<p>If setting up a <b>new</b> Spring Boot project, go to Spring Initializr (<code>start.spring.io</code>) and add <b>Spring Web</b> and <b>Spring Security</b> (add the JDBC session dependency only if you want sessions persisted in a relational DB).</p>
+
+<h2>Mechanisms we will walk through end to end</h2>
+<ol>
+<li><b>Form login</b> (stateful)</li>
+<li><b>Basic authentication</b> (stateless)</li>
+<li><b>JWT</b> (stateless)</li>
+<li><b>OAuth2</b>: authorization code (stateful or stateless), client credentials (stateless), password grant (stateless; deprecated in OAuth 2.1)</li>
+<li><b>API key authentication</b> (stateless), etc.</li>
+</ol>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Authentication vs authorization?</summary><p>Authentication proves identity (who are you); authorization decides permissions (what may you do). Authentication comes first.</p></details>
+<details><summary>How does Spring Security hook into a request?</summary><p>Through the <code>SecurityFilterChain</code>, a chain of servlet filters (via <code>DelegatingFilterProxy</code>) that runs before the DispatcherServlet.</p></details>
+<details><summary>Role of AuthenticationManager, AuthenticationProvider, UserDetailsService?</summary><p>Manager delegates to providers; the provider authenticates; UserDetailsService loads the user data used by the provider.</p></details>
+</div>

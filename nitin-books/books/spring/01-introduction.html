@@ -1,0 +1,165 @@
+<h1>Introduction: Servlets, Spring and Spring Boot</h1>
+<p class="kicker">Why Spring exists, what Spring Boot fixed, and the one idea everything else builds on: Dependency Injection.</p>
+
+<h2>First, the Servlet and the Servlet Container</h2>
+<ul>
+<li>It is the <b>foundation for building web applications</b> in Java.</li>
+<li>A <b>Servlet</b> is a Java class that handles a client request, processes it and returns the response.</li>
+<li>A <b>Servlet Container</b> (Tomcat is the popular one) is what <b>manages the Servlets</b>. Our application is deployed inside it.</li>
+</ul>
+<div class="flow"><b>Input request</b><i>arrives at</i><b>Servlet container (Tomcat)</b><i>1. reads web.xml servlet mapping</i><b>web.xml</b><i>2. invokes the matching</i><b>Servlet</b><i>3. response</i><b>Client</b></div>
+
+<p>In the old days each servlet was a class like this, and the URL-to-servlet mapping was written by hand in <code>web.xml</code>:</p>
+<pre><code class="java">@WebServlet("/demoservletone/*")
+public class DemoServlet1 extends HttpServlet {
+
+    @Override
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) {
+        String requestPathInfo = request.getPathInfo();
+        if (requestPathInfo.equals("/")) {
+            // do something
+        } else if (requestPathInfo.equals("/firstendpoint")) {
+            // do something
+        } else if (requestPathInfo.equals("/secondendpoint")) {
+            // do something
+        }
+    }
+
+    @Override
+    protected void doPut(HttpServletRequest request, HttpServletResponse response) {
+        // do something
+    }
+}</code></pre>
+<pre><code>&lt;servlet&gt;
+    &lt;servlet-name&gt;DemoServlet1&lt;/servlet-name&gt;
+    &lt;servlet-class&gt;DemoServlet1&lt;/servlet-class&gt;
+&lt;/servlet&gt;
+&lt;servlet-mapping&gt;
+    &lt;servlet-name&gt;DemoServlet1&lt;/servlet-name&gt;
+    &lt;url-pattern&gt;/demoservletone&lt;/url-pattern&gt;
+    &lt;url-pattern&gt;/demoservletone/firstendpoint&lt;/url-pattern&gt;
+    &lt;url-pattern&gt;/demoservletone/secondendpoint&lt;/url-pattern&gt;
+&lt;/servlet-mapping&gt;</code></pre>
+
+<h2>What problems did the Spring Framework solve?</h2>
+<table>
+<tr><th>Problem with Servlets</th><th>How Spring solves it</th></tr>
+<tr><td><b>web.xml</b> grows huge over time and is hard to manage and understand</td><td>Annotation-based configuration, so no web.xml</td></tr>
+<tr><td>The <b>Servlet container</b> creates the objects and controls their lifecycle</td><td><b>Inversion of Control (IoC)</b>: a more flexible way to manage object dependencies and lifecycle, done through Dependency Injection</td></tr>
+<tr><td><b>Unit testing is harder</b>: object creation belongs to the container, so mocking is not easy</td><td>Dependency injection makes mocking and unit testing very easy</td></tr>
+<tr><td><b>REST APIs are awkward</b>: handling HTTP methods, request parameters and path mapping makes the code hard to read</td><td><b>Spring MVC</b> gives an organised way to handle requests and build RESTful APIs</td></tr>
+</table>
+<p>Spring also integrates with lots of other technology: Hibernate/JPA/JDBC, JUnit and Mockito, caching, messaging, security, asynchronous programming and more. Developers pick the combination that fits.</p>
+
+<h2>The most important idea: Dependency Injection (IoC)</h2>
+<p><b>Without</b> dependency injection, a class creates the objects it needs itself:</p>
+<pre><code class="java">public class Payment {
+    User sender = new User();            // Payment builds its own User
+
+    void getSenderDetails(String userID) {
+        sender.getUserDetails(userID);
+    }
+}
+public class User {
+    public void getUserDetails(String id) { }
+}</code></pre>
+<p>This is <b>tight coupling</b>: <code>Payment</code> is glued to <code>User</code>.</p>
+<ul>
+<li>To unit-test <code>getSenderDetails()</code> you cannot easily <b>mock</b> <code>User</code>, because <code>Payment</code> creates a real one and so calls the real method.</li>
+<li>If tomorrow there are different kinds of user (<code>Admin</code>, <code>Member</code>), you cannot swap the user dynamically.</li>
+</ul>
+<p><b>With</b> dependency injection, Spring creates the object and hands it in:</p>
+<pre><code class="java">@Component
+public class Payment {
+    @Autowired
+    User sender;                          // Spring resolves and injects it
+
+    void getSenderDetails(String userID) {
+        sender.getUserDetails(userID);
+    }
+}
+@Component
+public class User {
+    public void getUserDetails(String id) { }
+}</code></pre>
+<ul>
+<li><b><code>@Component</code></b> tells Spring: "manage this class" (it becomes a <b>bean</b>).</li>
+<li><b><code>@Autowired</code></b> tells Spring: "resolve this dependency and put the object here".</li>
+</ul>
+
+<h2>How a request flows in Spring MVC</h2>
+<div class="flow"><b>Request</b><i>Tomcat hands over</i><b>DispatcherServlet</b><i>1. picks the controller using HandlerMapping</i><b>Controller</b><i>2. created with its dependencies</i><b>Handler method</b><i>4. response</i><b>Client</b></div>
+<p>The <code>DispatcherServlet</code> is the single front-door servlet. It chooses the controller, Spring creates an instance of that controller along with its dependencies, and the right API method is invoked.</p>
+
+<h2>The pain of plain Spring MVC</h2>
+<p>A classic Spring MVC project needed a lot of setup before the first API worked: servlet-api and spring-webmvc dependencies added one by one with matching versions, a config class and a dispatcher servlet initializer.</p>
+<pre><code class="java">@Configuration
+@EnableWebMvc
+@ComponentScan(basePackages = "com.conceptandcoding")
+public class AppConfig { }
+
+public class MyApplicationInitializer
+        extends AbstractAnnotationConfigDispatcherServletInitializer {
+
+    protected Class&lt;?&gt;[] getRootConfigClasses() { return null; }
+
+    protected Class&lt;?&gt;[] getServletConfigClasses() {
+        return new Class[] { AppConfig.class };
+    }
+
+    protected String[] getServletMappings() {
+        return new String[] { "/" };
+    }
+}</code></pre>
+
+<h2>What Spring Boot fixed</h2>
+<h3>1. Dependency management</h3>
+<p>No more adding many dependencies one by one and worrying about <b>compatible versions</b>. One parent plus starters:</p>
+<pre><code>&lt;parent&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-parent&lt;/artifactId&gt;
+    &lt;version&gt;3.2.3&lt;/version&gt;
+&lt;/parent&gt;
+...
+&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    &lt;artifactId&gt;spring-boot-starter-web&lt;/artifactId&gt;
+&lt;/dependency&gt;</code></pre>
+<h3>2. Auto-configuration</h3>
+<p>No need to configure <code>DispatcherServlet</code>, <code>AppConfig</code>, <code>@EnableWebMvc</code> or <code>@ComponentScan</code> yourself: Spring Boot adds them internally by default.</p>
+<pre><code class="java">@SpringBootApplication
+public class SpringbootApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(SpringbootApplication.class, args);
+    }
+}</code></pre>
+<h3>3. Embedded server</h3>
+<p>In traditional Spring MVC you build a <b>WAR file</b> (your classes, JSP pages, configuration and dependencies) and deploy it to an external servlet container such as Tomcat. In Spring Boot the servlet container is <b>already embedded</b>: just run the application.</p>
+
+<div class="box ex"><strong>Hello world: a whole API in a few lines</strong>
+<pre><code class="java">@RestController
+@RequestMapping("/myapi")
+public class MyController {
+
+    @GetMapping("/firstapi")
+    public String getData() {
+        return "Hello from concept and coding";
+    }
+}
+// GET localhost:8080/myapi/firstapi  ->  Hello from concept and coding</code></pre></div>
+
+<h2>So, what is Spring Boot?</h2>
+<ul>
+<li>A quick way to create a <b>production-ready</b> application.</li>
+<li>It is built on top of the Spring Framework.</li>
+<li>It follows <b>Convention over Configuration</b>: sensible default values are used, and a developer who wants something different can override them.</li>
+<li>It helps you run an application as quickly as possible.</li>
+</ul>
+<div class="flow"><b>Servlet</b><i>too much manual work, so</i><b>Spring Framework</b><i>too much setup, so</i><b>Spring Boot</b></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Spring vs Spring Boot?</summary><p>Spring is the framework (IoC, DI, MVC, data, security ...). Spring Boot is an opinionated layer on top of it: starters for dependencies, auto-configuration, an embedded server and production features, so you write far less setup code.</p></details>
+<details><summary>What is IoC and how is it different from DI?</summary><p>IoC is the principle: the framework, not your code, controls object creation and wiring. Dependency Injection is the technique used to achieve it: the container injects the dependencies into the object.</p></details>
+<details><summary>Why is constructing a dependency with <code>new</code> a problem?</summary><p>It creates tight coupling: you cannot mock it for tests or swap the implementation without editing the class.</p></details>
+<details><summary>What does <code>@SpringBootApplication</code> combine?</summary><p><code>@SpringBootConfiguration</code> (a configuration class), <code>@EnableAutoConfiguration</code> and <code>@ComponentScan</code>.</p></details>
+</div>

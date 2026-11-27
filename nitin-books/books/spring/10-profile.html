@@ -1,0 +1,98 @@
+<h1>@Profile</h1>
+<p class="kicker">Different configuration for dev, QA and prod, and beans that exist only in the right environment.</p>
+
+<h2>Why profiles?</h2>
+<p>The same application runs in different environments, and each has its own settings:</p>
+<table>
+<tr><th>Environment</th><th>username</th><th>password</th></tr>
+<tr><td>Dev (local machine)</td><td>devUsername</td><td>devPassword</td></tr>
+<tr><td>QA (stage machine)</td><td>qaUsername</td><td>qaPassword</td></tr>
+<tr><td>Prod (live)</td><td>prodUsername</td><td>prodPassword</td></tr>
+</table>
+<p>Username and password are just one example. Many other settings differ per environment: <b>URL and port</b>, <b>connection timeout</b>, <b>request timeout</b>, <b>throttle values</b>, <b>retry values</b> and more.</p>
+<p>We put configuration in <code>application.properties</code>. But how do we handle <b>different environments</b>? That is where <b>profiling</b> comes in.</p>
+
+<h2>Profile-specific property files</h2>
+<div class="diag">
+<div class="row"><div class="cb wide">application.properties<br><small>common / default values</small></div></div>
+<div class="row"><div class="cb sm">application-dev.properties</div><div class="cb sm">application-qa.properties</div><div class="cb sm">application-prod.properties</div></div>
+</div>
+<pre><code>application.properties
+username=defaultUsername
+password=defaultPassword
+
+application-dev.properties           application-prod.properties
+username=devUsername                 username=prodUsername
+password=devPassword                 password=prodPassword</code></pre>
+<p>The pattern is <code>application-{profile}.properties</code>. The common file is always loaded; the profile file is loaded on top of it and its values <b>override</b> the common ones.</p>
+<pre><code class="java">@Value("${username}") String username;
+@Value("${password}") String password;
+
+@PostConstruct
+public void init() {
+    System.out.println("username: " + username + " password: " + password);
+}</code></pre>
+
+<h2>Choosing the active profile</h2>
+<p>At startup we tell Spring Boot which file to pick through <code>spring.profiles.active</code>:</p>
+<pre><code>application.properties
+spring.profiles.active=prod</code></pre>
+<p>or pass it when starting the application itself, which is better because the same build can then run anywhere:</p>
+<pre><code>mvn spring-boot:run -Dspring-boot.run.profiles=prod
+java -jar app.jar --spring.profiles.active=prod
+SPRING_PROFILES_ACTIVE=prod            (environment variable)</code></pre>
+<p>The log confirms it: <b>The following 1 profile is active: "prod"</b>, and the program prints <code>username: prodUsername password: prodPassword</code>. With no profile set, you see "No active profile set, falling back to 1 default profile: default" and the default values are used.</p>
+<p>We can also set <b>multiple profiles</b> at a time, comma separated:</p>
+<pre><code>spring.profiles.active=prod,qa</code></pre>
+<p>When profiles define the same key, the <b>last one listed wins</b>.</p>
+
+<h2>The @Profile annotation</h2>
+<p>Using <code>@Profile</code> we tell Spring Boot to create a <b>bean only when a particular profile is active</b>.</p>
+<pre><code class="java">@Component
+@Profile("dev")
+public class DevDBConnection { ... }          // exists only when "dev" is active
+
+@Component
+@Profile("prod")
+public class ProdDBConnection { ... }
+
+@Component
+@Profile("!prod")                              // every profile except prod
+public class MockPaymentClient { ... }
+
+@Component
+@Profile({"qa", "stage"})                      // either of the two
+public class TestDataLoader { ... }</code></pre>
+
+<h2>The interview scenario</h2>
+<p>You have <b>2 applications and 1 common code base</b>. How do you make sure a bean is created for only one application and not the other?</p>
+<pre><code class="java">// Common codebase
+@Component
+@Profile("app1")
+public class NoSQLConnection {
+
+    @Value("${username}") String username;
+    @Value("${password}") String password;
+
+    @PostConstruct
+    public void init() {
+        System.out.println("NoSQL username: " + username + " : " + password);
+    }
+}</code></pre>
+<p>Application 1 runs with <code>spring.profiles.active=app1</code> (and its own <code>application.properties</code>), so the bean is created. Application 2 runs with another profile, so the bean is simply never created there, even though the class is in the same shared jar.</p>
+<div class="flow"><b>Common code base</b><i>@Profile("app1")</i><b>Application 1 (profile app1)</b><i>bean created</i><b>Application 2 (other profile)</b><i>bean skipped</i></div>
+
+<div class="box extra"><strong>Good to know</strong>
+<ul>
+<li>Beans with no <code>@Profile</code> are created in <b>every</b> profile.</li>
+<li>The <code>default</code> profile is active when nothing else is set; <code>@Profile("default")</code> beans exist only then.</li>
+<li>Never commit real production passwords into <code>application-prod.properties</code>. Pass secrets as environment variables or from a secret manager.</li>
+<li>Read the active profiles in code with <code>Environment.getActiveProfiles()</code>.</li>
+<li>Spring Boot also allows a profile-specific <code>application-dev.yml</code>, or one multi-document YAML with <code>spring.config.activate.on-profile</code>.</li>
+</ul></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>How do you handle different configuration per environment?</summary><p>Profiles: <code>application-{profile}.properties</code> plus <code>spring.profiles.active</code>, passed at launch so the same artifact is promoted unchanged from dev to prod.</p></details>
+<details><summary>What if two active profiles define the same property?</summary><p>The profile listed later wins.</p></details>
+<details><summary>How can a bean exist only in dev and QA but not in prod?</summary><p><code>@Profile({"dev","qa"})</code> or <code>@Profile("!prod")</code>.</p></details>
+</div>

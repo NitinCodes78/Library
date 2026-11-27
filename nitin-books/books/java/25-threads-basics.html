@@ -1,0 +1,186 @@
+<h1>Threads: Creation, Lifecycle and Synchronization</h1>
+<p class="kicker">Doing more than one thing at once, and keeping it safe.</p>
+
+<h2>Two ways to create a thread</h2>
+<div class="tree2"><div class="top">Thread creation</div><div class="kids"><div><b>Implement the <code>Runnable</code> interface</b></div><div><b>Extend the <code>Thread</code> class</b></div></div></div>
+<div class="diag">
+<div class="row"><div class="cb">&laquo;interface&raquo;<br><b>Runnable</b><br><small>functional: one abstract method <code>run()</code></small></div></div>
+<div class="row"><div class="cb">implemented by<br><b>Thread</b><br><small>init(), run(), sleep(), start(), stop(), interrupt() ...</small></div><div class="cb">implemented by<br><b>MyClass</b><br><small>run() &mdash; whatever we implement here, the thread will invoke it</small></div></div></div>
+<p><b>Thread implements Runnable.</b></p>
+
+<h3>Way 1: implement Runnable</h3>
+<p><b>Step 1: create a Runnable object</b>: create a class that implements <code>Runnable</code>, and implement the <code>run()</code> method to tell the task what the thread has to do.</p>
+<pre><code class="java">public class MultiThreading implements Runnable {
+    @Override
+    public void run() {
+        System.out.println("Code by thread: " + Thread.currentThread().getName());
+    }
+}</code></pre>
+<p><b>Step 2: start the thread</b>: create an instance of the class that implements <code>Runnable</code>, pass the Runnable object to the <code>Thread</code> constructor, and start the thread.</p>
+<pre><code class="java">MultiThreading runnableObj = new MultiThreading();
+Thread thread = new Thread(runnableObj);       // constructor param
+thread.start();
+System.out.println(Thread.currentThread().getName());     // main</code></pre>
+<p><code>start()</code> internally calls the <code>run()</code> method: it checks that the Runnable object is not null (a child class implementing it is there) and then executes its <code>run()</code>. This is useful, as our class can do a lot of other stuff other than just implementing the <code>run()</code> method.</p>
+
+<h3>Way 2: extend Thread</h3>
+<div class="flow"><b>Runnable</b><i>implements</i><b>Thread</b><i>extends</i><b>MyClass<br><small>run()</small></b></div>
+<pre><code class="java">public class MultiThreadingLearning extends Thread {
+    @Override
+    public void run() {
+        System.out.println("Code by Thread: " + Thread.currentThread().getName());
+    }
+}
+
+MultiThreadingLearning myThread = new MultiThreadingLearning();   // child of Thread
+myThread.start();            // directly from myThread: no need to create an object of Thread</code></pre>
+
+<h3>Why two methods?</h3>
+<ul>
+<li>Java does <b>not support multiple inheritance</b>. If my class already extends some other class, then I <b>cannot extend Thread</b>. That is why we have Runnable.</li>
+<li>When I implement Runnable, it just defines the task (<code>run()</code> logic); we pass it to a Thread object. Our class is <b>not a Thread</b>.</li>
+</ul>
+<p>So: <b>Runnable defines the task</b>; <b>Thread handles thread mechanics</b>. We separate <b>what to do</b> and <b>how to run it</b>: a good OOP principle.</p>
+<p><b>Always <code>start()</code>, never <code>run()</code>.</b> Calling <code>thread.run()</code> directly just executes the method like a normal call on the <b>current</b> thread. Only <code>start()</code> creates a new thread. Calling <code>start()</code> twice throws <code>IllegalThreadStateException</code>.</p>
+<div class="box extra"><strong>The lambda way</strong>
+<p>Since Runnable is a functional interface: <code>new Thread(() -&gt; System.out.println("hi")).start();</code></p></div>
+
+<h2>Thread lifecycle</h2>
+<div class="diag">
+<div class="row"><div class="cb">New</div><div class="cb">&rarr; start() &rarr;</div><div class="cb wide"><b>Runnable</b> &lt;-&gt; Running<br><small>waiting for CPU / got CPU (context switching; "running" is not a separate state, they keep switching)</small></div><div class="cb">Terminated<br><small>run() finished</small></div></div>
+<div class="row"><div class="cb"><b>Blocked</b><br><small>waiting for a monitor lock held by another thread</small></div><div class="cb"><b>Waiting</b><br><small>wait(); until notify()</small></div><div class="cb"><b>Timed waiting</b><br><small>sleep(), join(); until time expires / join completes</small></div></div></div>
+<table>
+<tr><th>State</th><th>Description</th></tr>
+<tr><td><b>New</b></td><td>The thread has been created but not started. Just an object in memory.</td></tr>
+<tr><td><b>Runnable</b></td><td>The thread is ready to run and waiting for CPU time.</td></tr>
+<tr><td><b>Running</b></td><td>When the thread starts executing its code.</td></tr>
+<tr><td><b>Blocked</b></td><td>The thread wants to enter a <code>synchronized</code> block or method whose monitor lock is held by another thread, so it has to wait. It keeps the locks it already holds. (A thread waiting on I/O, like reading a file or database, still shows as RUNNABLE.)</td></tr>
+<tr><td><b>Waiting</b></td><td>The thread goes into this state when we call the <code>wait()</code> method, which makes it non-runnable. It goes back to runnable once we call <code>notify()</code> or <code>notifyAll()</code>. We can explicitly call this until we call notify.</td></tr>
+<tr><td><b>Timed waiting</b></td><td>The thread waits for a specific period of time and comes back to the runnable state after specific conditions are met, like <code>sleep()</code>, <code>join()</code>. Does <b>not</b> release any monitor locks.</td></tr>
+<tr><td><b>Terminated</b></td><td>The life of the thread is completed; it can't be started again.</td></tr>
+</table>
+<ul>
+<li>Java officially has <b>6 states</b>: NEW, RUNNABLE, BLOCKED, WAITING, TIMED_WAITING, TERMINATED. "Running" is not a separate state: it is part of RUNNABLE.</li>
+<li><b>BLOCKED</b> means specifically "waiting to enter a synchronized block/method (monitor lock)". A thread waiting for <b>I/O</b> still shows as RUNNABLE.</li>
+<li>A BLOCKED thread <b>keeps</b> the locks it already holds (that is how deadlocks happen). <code>wait()</code> releases <b>only the monitor of the object it is called on</b>, not other locks it holds.</li>
+</ul>
+
+<h3>join()</h3>
+<p>The <code>join</code> method <b>pauses the execution of the current (calling) thread until the thread on which <code>join()</code> was called completes its task</b>. It ensures sequential, synchronized execution, allowing one thread to wait for another to finish before proceeding.</p>
+<pre><code class="java">Thread t1 = new Thread(new MyRunnable());
+t1.start();
+t1.join();      // main thread waits here until t1 finishes
+System.out.println("t1 is finished, now proceeding");</code></pre>
+
+<h3>wait() vs sleep()</h3>
+<p><code>wait()</code> is used for <b>inter-thread communication</b> and <b>releases the object lock</b>, while <code>sleep()</code> is used for a simple <b>time-based pause</b> and does <b>not release</b> the lock it holds.</p>
+<table>
+<tr><th><code>wait()</code></th><th><code>sleep()</code></th></tr>
+<tr><td>Belongs to the <b>Object</b> class</td><td>Belongs to the <b>Thread</b> class</td></tr>
+<tr><td>Releases the object lock during synchronization</td><td>Does not release the object lock while waiting</td></tr>
+<tr><td>Must be called within a synchronized block or method</td><td>Can be called from anywhere</td></tr>
+<tr><td>A non-static method</td><td>A static method</td></tr>
+</table>
+
+<h2>Monitor lock</h2>
+<p>A <b>built-in synchronization mechanism associated with every object</b>, ensuring that only one thread can execute a synchronized method or block <b>for that object</b> at a time. When a thread enters a synchronized block or method, it must first acquire the monitor lock of the object. As long as one thread owns the lock, any other thread attempting to acquire the same lock will be <b>blocked</b>. It helps to make sure that only 1 thread goes inside the particular section of code.</p>
+<pre><code class="java">public class MonitorLockExample {
+    public synchronized void task1() {
+        try {
+            System.out.println("inside task1");
+            Thread.sleep(10000);
+        } catch (Exception e) { }
+    }
+
+    public void task2() {
+        System.out.println("task2, but before synchronized");
+        synchronized (this) {
+            System.out.println("task 2, inside synchronized");
+        }
+    }
+
+    public void task3() {
+        System.out.println("task3");
+    }
+}
+
+// main class
+MonitorLockExample obj = new MonitorLockExample();
+Thread t1 = new Thread(() -&gt; { obj.task1(); });     // Thread contains one abstract method run(): the lambda way
+Thread t2 = new Thread(() -&gt; { obj.task2(); });
+Thread t3 = new Thread(() -&gt; { obj.task3(); });
+t1.start();  t2.start();  t3.start();</code></pre>
+<pre><code>Output:
+inside task1
+task3
+task2, but before synchronized
+(10 seconds pass: task1 completed)
+task 2, inside synchronized</code></pre>
+<p>The monitor lock was acquired by task1. The lock was released, then task2 got into the monitor lock.</p>
+<div class="box ex"><strong>Key takeaway</strong>
+<p>A synchronized method does <b>not</b> lock the entire object, it only blocks access to other synchronized blocks on the same object. If you have a synchronized <code>withdraw()</code> and a non-synchronized <code>checkBalance()</code>, a user can still check the balance while a withdraw is happening. If you want <code>checkBalance</code> to wait, you must also mark it synchronized. <b>Synchronized only makes the code blocks thread-safe relative to each other.</b></p></div>
+
+<h2>Producer-consumer with wait / notify</h2>
+<p>A classic scenario for using <code>wait()</code>: two threads must coordinate to share a fixed-size buffer (like a queue). A shared buffer with a capacity of 1: the producer wants to add an item to the buffer; if the buffer is already full, it must wait until the consumer removes the item. The consumer wants to take an item; if the buffer is empty, it must <code>wait()</code> until the producer adds something.</p>
+<pre><code class="java">public class SharedResource {
+    boolean isItemPresent = false;
+
+    public synchronized void addItem() {       // working on the same resource, so monitor lock comes into play
+        isItemPresent = true;
+        notifyAll();                           // any thread on wait for this will continue
+    }
+
+    public synchronized void consumeItem() {
+        while (!isItemPresent) {               // while, not if: re-check after every wake-up
+            try {
+                wait();                        // releases the monitor lock
+            } catch (InterruptedException e) { }
+        }
+        isItemPresent = false;
+    }
+}
+
+// main
+SharedResource sharedResourceObj = new SharedResource();
+Thread producerThread = new Thread(() -&gt; { sharedResourceObj.addItem(); });
+Thread consumerThread = new Thread(() -&gt; { sharedResourceObj.consumeItem(); });
+producerThread.start();
+consumerThread.start();</code></pre>
+<p>This can be done by creating separate classes implementing Runnable. You can also add a put condition (the buffer-full wait) in the producer, for example when the queue size is greater than 1, while the buffer can hold more items.</p>
+<p>Wrap <code>wait()</code> in a <b><code>while</code> loop, not an <code>if</code></b>. A waiting thread can wake up without the condition being true (<b>spurious wakeup</b>, or another consumer took the item first), so the safe pattern is <code>while (!isItemPresent) { wait(); }</code>, which re-checks the condition each time. Also remember: <code>wait()</code>, <code>notify()</code> and <code>notifyAll()</code> must be called while holding that object's monitor, or you get <code>IllegalMonitorStateException</code>.</p>
+
+<h2>Why are stop(), suspend() and resume() deprecated?</h2>
+<ul>
+<li><b>stop:</b> terminates the thread abruptly. <b>No lock release, no resource clean-up</b> happens.</li>
+<li><b>suspend:</b> puts the thread on hold temporarily. <b>No lock is released</b> either.</li>
+<li><b>resume:</b> used to resume the execution of a suspended thread.</li>
+</ul>
+<p>Both these operations could lead to issues like <b>deadlock</b>. The safe way to stop a thread is to set a flag (or call <code>interrupt()</code>) and let the thread exit by itself.</p>
+
+<h2>Thread priority</h2>
+<ul>
+<li>Priorities are integers ranging from <b>1 to 10</b>: 1 is low priority, 10 is the highest.</li>
+<li>Even if we set the thread priority at creation, it is <b>not guaranteed</b> to follow any specific order: it's just a <b>hint to the thread scheduler</b> about which to execute next (not a strict rule). We can't rely on this.</li>
+<li>When a new thread is created, it <b>inherits the priority of its parent thread</b>.</li>
+<li>We can set a custom priority using <code>setPriority(int priority)</code>.</li>
+</ul>
+
+<h2>Daemon thread</h2>
+<p>Something which runs async, in the background. <b>If only daemon threads remain, the JVM will exit and return.</b> They are low-priority background threads designed for non-critical supporting tasks, such as garbage collection and monitoring, and are <b>automatically terminated by the JVM when all user threads finish</b>.</p>
+<div class="diag"><div class="row"><div class="cb">Threads</div><div class="cb">User thread<br><small>we can make it a daemon by <code>t.setDaemon(true)</code></small></div><div class="cb">Daemon thread</div></div></div>
+<pre><code class="java">public static void main(String[] args) {
+    Thread t1 = new Thread(() -&gt; { /* time-consuming task */ });
+    t1.setDaemon(true);
+    t1.start();
+    System.out.println("main finished");
+}   // main method finished: JVM won't wait for t1 to finish, and will exit</code></pre>
+<div class="box extra"><strong>Good to know</strong>
+<p><code>setDaemon(true)</code> must be called <b>before</b> <code>start()</code>, or you get <code>IllegalThreadStateException</code>.</p></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Runnable vs extending Thread?</summary><p>Prefer Runnable: it keeps the task separate from the thread, lets your class extend something else, and works with executors.</p></details>
+<details><summary>start() vs run()?</summary><p><code>start()</code> creates a new thread that calls <code>run()</code>; calling <code>run()</code> directly just runs it on the caller's thread.</p></details>
+<details><summary>wait() vs sleep()?</summary><p>wait releases the monitor and is woken by notify (Object method, needs synchronized). sleep keeps all locks and wakes after the time (Thread static method).</p></details>
+<details><summary>What does synchronized actually lock?</summary><p>The monitor of one object (or the Class object for static methods). Different objects don't block each other.</p></details>
+<details><summary>What is a daemon thread?</summary><p>A background service thread that does not keep the JVM alive, e.g. the garbage collector.</p></details>
+</div>

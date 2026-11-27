@@ -1,0 +1,143 @@
+<h1>Custom Interceptors</h1>
+<p class="kicker">Run code before and after a controller method: for every request, for selected URLs, or only for methods carrying your own annotation.</p>
+
+<h2>What is an interceptor?</h2>
+<p>It is a <b>mediator that gets invoked before or after your actual code</b>. We often need custom interceptors for caching, logging, authentication and similar cross-cutting work.</p>
+<p>Helpful background: Java annotations and AOP (pointcut, proxy, interception).</p>
+
+<h2>Interceptor for requests before they reach a specific controller</h2>
+<div class="flow"><b>Request</b><i>Tomcat</i><b>DispatcherServlet</b><i>HandlerMapping picks the controller</i><b>Interceptor.preHandle</b><i>true</i><b>Controller method</b><i>then</i><b>postHandle, afterCompletion</b></div>
+<p>Implement <code>HandlerInterceptor</code> and register it:</p>
+<pre><code class="java">@Component
+public class MyCustomInterceptor implements HandlerInterceptor {
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        System.out.println("inside pre handle Method");
+        return true;                 // true: continue to the controller; false: stop here
+    }
+
+    @Override
+    public void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler,
+                           @Nullable ModelAndView modelAndView) throws Exception {
+        System.out.println("inside post handle method");
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler,
+                                @Nullable Exception ex) throws Exception {
+        System.out.println("inside after completion method");
+    }
+}
+
+@Configuration
+public class AppConfig implements WebMvcConfigurer {
+
+    @Autowired
+    MyCustomInterceptor myCustomInterceptor;
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(myCustomInterceptor)
+                .addPathPatterns("/api/*")                                    // apply to these URL patterns
+                .excludePathPatterns("/api/updateUser", "/api/deleteUser");   // exclude these
+    }
+}</code></pre>
+<p>Calling <code>/api/getUser</code> prints:</p>
+<pre><code>inside pre handle Method
+hitting db to get the userdata          &lt;- the controller method
+inside post handle method
+inside after completion method</code></pre>
+
+<table>
+<tr><th>Method</th><th>Called</th><th>Notes</th></tr>
+<tr><td><code>preHandle</code></td><td>before the controller method</td><td>return <code>false</code> to stop the request (the controller and later interceptors are skipped); good for auth checks</td></tr>
+<tr><td><code>postHandle</code></td><td>after the controller method, before the view/response is written</td><td>not called if the controller throws</td></tr>
+<tr><td><code>afterCompletion</code></td><td>after the whole request is complete</td><td>always called once <code>preHandle</code> returned true, even on exception; good for cleanup</td></tr>
+</table>
+
+<h2>Interceptor for requests only on methods carrying a custom annotation</h2>
+<p>Sometimes we do not want URL patterns; we want to mark particular controller methods and run the interceptor only for those.</p>
+<h3>Step 1: create a custom annotation</h3>
+<p>A custom annotation is created with the keyword <code>@interface</code>.</p>
+<pre><code class="java">public @interface MyCustomAnnotation { }
+
+public class User {
+    @MyCustomAnnotation
+    public void updateUser() {
+        // some business logic
+    }
+}</code></pre>
+<p>Annotations can carry values. Rules for an annotation's "methods" (they behave like fields):</p>
+<ul>
+<li><b>No parameters, no body.</b></li>
+<li>The return type is restricted to: <b>primitives</b> (int, boolean, double ...), <b>String</b>, <b>enum</b>, <b><code>Class&lt;?&gt;</code></b>, <b>other annotations</b>, or an <b>array</b> of those.</li>
+</ul>
+<pre><code class="java">@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface MyCustomAnnotation {
+    String key() default "defaultKeyName";
+}
+
+@MyCustomAnnotation(key = "userKey")
+public void updateUser() { ... }
+
+// all the allowed kinds together
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface MyCustomAnnotation {
+    int intKey() default 0;
+    String stringKey() default "defaultString";
+    Class&lt;?&gt; classTypeKey() default String.class;
+    MyCustomEnum enumKey() default MyCustomEnum.ENUM_VAL1;
+    String[] stringArrayKey() default {"default1", "default2"};
+    int[] intArrayKey() default {1, 2};
+}</code></pre>
+<ul>
+<li><code>@Target</code> says <b>where</b> the annotation can be placed (method, type, field ...).</li>
+<li><code>@Retention(RetentionPolicy.RUNTIME)</code> keeps it <b>available at runtime</b>, which the interceptor needs to read it.</li>
+</ul>
+
+<h3>Step 2: the interceptor checks for the annotation</h3>
+<p>In <code>preHandle</code>, the <code>handler</code> object is a <code>HandlerMethod</code> when the request maps to a controller method. Read the annotation from it:</p>
+<pre><code class="java">@Component
+public class MyCustomInterceptor implements HandlerInterceptor {
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        if (handler instanceof HandlerMethod handlerMethod) {
+            MyCustomAnnotation annotation = handlerMethod.getMethodAnnotation(MyCustomAnnotation.class);
+            if (annotation != null) {
+                System.out.println("annotation present, key = " + annotation.key());
+                // do the special work only for annotated methods
+            }
+        }
+        return true;
+    }
+}
+
+@GetMapping(path = "/getUser")
+@MyCustomAnnotation(key = "userKey")
+public String getUser() { ... }</code></pre>
+<p>Register the interceptor as before, usually with a broad pattern like <code>/**</code>, and let the annotation decide where the logic really applies.</p>
+
+<h2>Multiple interceptors and ordering</h2>
+<p>You can register many interceptors. They run in <b>registration order</b> for <code>preHandle</code>, and in <b>reverse order</b> for <code>postHandle</code> and <code>afterCompletion</code>.</p>
+<pre><code class="java">@Override
+public void addInterceptors(InterceptorRegistry registry) {
+    // below order is maintained while calling the interceptors
+    registry.addInterceptor(myCustomInterceptor1)
+            .addPathPatterns("/api/*")
+            .excludePathPatterns("/api/updateUser", "/api/deleteUser");
+    registry.addInterceptor(myCustomInterceptor2)
+            .addPathPatterns("/api/*")
+            .excludePathPatterns("/api/updateUser");
+}</code></pre>
+<div class="flow"><b>pre 1</b><i>true</i><b>pre 2</b><i>true</i><b>controller</b><i>then</i><b>post 2</b><b>post 1</b><i>then</i><b>after 2</b><b>after 1</b></div>
+<p>If <code>preHandle</code> returns <code>false</code>, the next interceptor and the controller are <b>not invoked</b> at all. (You then write the response yourself, for example <code>response.setStatus(401)</code>.)</p>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>What are the three methods of HandlerInterceptor?</summary><p><code>preHandle</code>, <code>postHandle</code>, <code>afterCompletion</code>.</p></details>
+<details><summary>How do you run an interceptor only for some endpoints?</summary><p>URL patterns (<code>addPathPatterns</code>/<code>excludePathPatterns</code>) or a custom annotation read through <code>HandlerMethod</code>.</p></details>
+<details><summary>What if preHandle returns false?</summary><p>The chain stops: no further interceptors, no controller. <code>afterCompletion</code> runs only for interceptors whose <code>preHandle</code> already returned true.</p></details>
+</div>

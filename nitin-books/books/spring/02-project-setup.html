@@ -1,0 +1,78 @@
+<h1>Project Setup and the Layered Architecture</h1>
+<p class="kicker">Generate a Spring Boot project in two minutes, then learn how the code is split into layers.</p>
+
+<h2>1. Create the project with Spring Initializr</h2>
+<p>Go to <b>start.spring.io</b> (Spring Initializr) and fill in:</p>
+<table>
+<tr><th>Field</th><th>Example used in the notes</th></tr>
+<tr><td>Project</td><td>Maven</td></tr>
+<tr><td>Language</td><td>Java</td></tr>
+<tr><td>Spring Boot</td><td>a stable release (e.g. 3.2.3), not a SNAPSHOT or milestone (M1) build</td></tr>
+<tr><td>Group</td><td><code>com.conceptandcoding</code></td></tr>
+<tr><td>Artifact</td><td><code>learningspringboot</code></td></tr>
+<tr><td>Name / Description</td><td>springboot application / project for learning spring boot</td></tr>
+<tr><td>Package name</td><td><code>com.conceptandcoding.learningspringboot</code></td></tr>
+<tr><td>Packaging</td><td>Jar (War only if you will deploy into an external Tomcat)</td></tr>
+<tr><td>Java</td><td>17 (or 21)</td></tr>
+<tr><td>Dependencies</td><td><b>Spring Web</b>: builds web apps including RESTful APIs using Spring MVC, with <b>Apache Tomcat as the default embedded container</b></td></tr>
+</table>
+<p>Press Generate, unzip and open the project in your IDE.</p>
+
+<h2>2. Layered architecture</h2>
+<p>A typical Spring Boot application is split into layers. Each layer talks only to its neighbour, which keeps the code easy to test and change.</p>
+<div class="diag">
+<div class="row"><div class="cb sm">DTO</div><div class="cb sm">Utility</div><div class="cb sm">Entity</div><div class="cb sm">Configuration</div></div>
+<div class="row"><div class="cb">Clients</div><div class="cb">Controller layer</div><div class="cb">Service layer</div><div class="cb">Repository layer</div><div class="cb sm">DB</div></div>
+</div>
+<table>
+<tr><th>Layer</th><th>Responsibility</th></tr>
+<tr><td><b>Controller</b></td><td>Receives the client request, maps incoming data to an internal request object, calls the service and returns the response</td></tr>
+<tr><td><b>Service</b></td><td>Business logic. Calls the repository and maps the entity to a response object</td></tr>
+<tr><td><b>Repository</b></td><td>Talks to the database (connect, run the query, fetch the data)</td></tr>
+<tr><td><b>DTO</b>, <b>Entity</b>, <b>Utility</b>, <b>Configuration</b></td><td>Supporting classes that the layers share: data carriers, table mappings, helpers and settings</td></tr>
+</table>
+
+<div class="box ex"><strong>One request through all three layers</strong>
+<pre><code class="java">@RestController
+@RequestMapping("/payments")
+public class PaymentController {
+
+    @Autowired
+    PaymentService paymentService;
+
+    @GetMapping("/{id}")
+    public ResponseEntity&lt;PaymentResponse&gt; getPaymentById(@PathVariable Long id) {
+        // map incoming data to an internal request object
+        PaymentRequest internalRequestObj = new PaymentRequest();
+        internalRequestObj.setPaymentId(id);
+
+        // pass it to the service layer for processing
+        PaymentResponse payment = paymentService.getPaymentDetailsById(internalRequestObj);
+
+        // return the response DTO
+        return ResponseEntity.ok(payment);
+    }
+}
+
+@Service
+public class PaymentService {
+    @Autowired
+    PaymentRepository paymentRepository;
+
+    public PaymentResponse getPaymentDetailsById(PaymentRequest internalRequestObj) {
+        PaymentEntity paymentModel = paymentRepository.getPaymentById(internalRequestObj);
+        return mapModelToResponse(paymentModel);          // entity -> response DTO
+    }
+}
+
+@Repository
+public class PaymentRepository {
+    public PaymentEntity getPaymentById(PaymentRequest request) {
+        return executeQuery(request);                     // connect with DB and fetch the data
+    }
+}</code></pre></div>
+
+<div class="box iq"><strong>Interview corner</strong>
+<details><summary>Why separate controller, service and repository?</summary><p>Separation of concerns: HTTP handling, business rules and data access change for different reasons. Each layer can be tested alone (mock the layer below) and replaced without touching the others.</p></details>
+<details><summary>Why use a DTO instead of returning the entity?</summary><p>The entity mirrors a table and may hold fields the client must never see (or lazy relations that fail to serialise). A DTO is the API contract and lets the database and the API evolve independently.</p></details>
+</div>
