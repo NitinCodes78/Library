@@ -1,6 +1,6 @@
 // Offline cache: the books open instantly and work without internet after the first visit.
 // Bump the version number whenever you publish new chapters, so every device refreshes its copy.
-const CACHE = "nitin-books-v3";
+const CACHE = "nitin-books-v4";
 const CORE = ["./", "index.html", "books.json", "manifest.webmanifest", "icon.svg"];
 self.addEventListener("install", e => {
   e.waitUntil((async () => {
